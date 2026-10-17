@@ -84,6 +84,11 @@ def collect_licenses():
         target = destination / "TclTk" / library.parent.name
         target.mkdir(parents=True, exist_ok=True)
         shutil.copy2(library, target / library.name)
+    for entry in manifest:
+        if entry["package"] == "flatbuffers":
+            manual = "licenses/flatbuffers-APACHE-2.0.txt"
+            if manual not in entry["license_files"]:
+                entry["license_files"].append(manual)
     (destination / "dependency-manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
