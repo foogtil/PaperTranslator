@@ -1,0 +1,23 @@
+[
+  {
+    "filename": "ch_PP-OCRv3_det_infer.onnx",
+    "sha256": "3439588c030faea393a54515f51e983d8e155b19a2e8aba7891934c1cf0de526",
+    "bytes": 2432880,
+    "origin": "PaddleOCR weights converted and redistributed by RapidOCR 1.2.3",
+    "license": "Apache-2.0"
+  },
+  {
+    "filename": "ch_PP-OCRv3_rec_infer.onnx",
+    "sha256": "897a3ededb38fee0dae2c1ccee38241f37df202c9509e3abca02e9217c5ee615",
+    "bytes": 10690752,
+    "origin": "PaddleOCR weights converted and redistributed by RapidOCR 1.2.3",
+    "license": "Apache-2.0"
+  },
+  {
+    "filename": "ch_ppocr_mobile_v2.0_cls_infer.onnx",
+    "sha256": "e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c",
+    "bytes": 585532,
+    "origin": "PaddleOCR weights converted and redistributed by RapidOCR 1.2.3",
+    "license": "Apache-2.0"
+  }
+]

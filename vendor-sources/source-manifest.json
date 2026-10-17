@@ -1,0 +1,46 @@
+[
+  {
+    "project": "PyMuPDF",
+    "version": "1.27.2.3",
+    "file": "pymupdf-1.27.2.3.tar.gz",
+    "sha256": "7a92faa25129e8bbec5e50eeb9214f187665428c31b05c4ef6e36c58c0b1c6d2",
+    "source_url": "https://files.pythonhosted.org/packages/22/32/708bedc9dde7b328d45abbc076091769d44f2f24ad151ad92d56a6ec142b/pymupdf-1.27.2.3.tar.gz"
+  },
+  {
+    "project": "rapidocr-onnxruntime",
+    "version": "1.2.3",
+    "file": "rapidocr_onnxruntime-1.2.3-py3-none-any.whl",
+    "sha256": "c707d3a6eb72d13119afe9602d3cc36d8b2a4a4d74e9575cf1b0e67ed6a27819",
+    "source_url": "https://files.pythonhosted.org/packages/b7/ef/0df9a58310895ab357f85df67935af6a8fb98f0965c7476cee6fcb966a7e/rapidocr_onnxruntime-1.2.3-py3-none-any.whl"
+  },
+  {
+    "project": "Shapely",
+    "version": "2.1.2",
+    "file": "shapely-2.1.2.tar.gz",
+    "sha256": "2ed4ecb28320a433db18a5bf029986aa8afcfd740745e78847e330d5d94922a9",
+    "source_url": "https://files.pythonhosted.org/packages/4d/bc/0989043118a27cccb4e906a46b7565ce36ca7b57f5a18b78f4f1b0f72d9d/shapely-2.1.2.tar.gz"
+  },
+  {
+    "project": "chardet",
+    "version": "6.0.0.post1",
+    "file": "chardet-6.0.0.post1.tar.gz",
+    "sha256": "6b78048c3c97c7b2ed1fbad7a18f76f5a6547f7d34dbab536cc13887c9a92fa4",
+    "source_url": "https://files.pythonhosted.org/packages/7f/42/fb9436c103a881a377e34b9f58d77b5f503461c702ff654ebe86151bcfe9/chardet-6.0.0.post1.tar.gz"
+  },
+  {
+    "project": "GEOS",
+    "version": "3.13.1",
+    "file": "geos-3.13.1.tar.bz2",
+    "source_url": "https://download.osgeo.org/geos/geos-3.13.1.tar.bz2",
+    "sha256": "df2c50503295f325e7c8d7b783aca8ba4773919cde984193850cf9e361dfd28c",
+    "verification": "HTTPS upstream download; local checksum, not an upstream signature"
+  },
+  {
+    "project": "MuPDF",
+    "version": "1.27.2",
+    "file": "mupdf-1.27.2-source.tar.gz",
+    "source_url": "https://mupdf.com/downloads/archive/mupdf-1.27.2-source.tar.gz",
+    "sha256": "553867b135303dc4c25ab67c5f234d8e900a0e36e66e8484d99adc05fe1e8737",
+    "verification": "HTTPS upstream download; local checksum, not an upstream signature"
+  }
+]

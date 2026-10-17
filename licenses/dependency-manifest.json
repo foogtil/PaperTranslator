@@ -1,0 +1,593 @@
+[
+  {
+    "package": "PyMuPDF",
+    "version": "1.27.2.3",
+    "license_files": [
+      "licenses\\PyMuPDF\\pymupdf-1.27.2.3.dist-info\\COPYING"
+    ],
+    "project_urls": [
+      "Documentation, https://pymupdf.readthedocs.io/",
+      "Source, https://github.com/pymupdf/pymupdf",
+      "Tracker, https://github.com/pymupdf/PyMuPDF/issues",
+      "Changelog, https://pymupdf.readthedocs.io/en/latest/changes.html"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "rapidocr-onnxruntime",
+    "version": "1.2.3",
+    "license_files": [],
+    "project_urls": [],
+    "homepage": "https://github.com/RapidAI/RapidOCR"
+  },
+  {
+    "package": "onnxruntime",
+    "version": "1.20.1",
+    "license_files": [
+      "licenses\\onnxruntime\\onnxruntime\\LICENSE",
+      "licenses\\onnxruntime\\onnxruntime\\ThirdPartyNotices.txt"
+    ],
+    "project_urls": [],
+    "homepage": "https://onnxruntime.ai"
+  },
+  {
+    "package": "opencv-python",
+    "version": "5.0.0.93",
+    "license_files": [
+      "licenses\\opencv-python\\cv2\\LICENSE-3RD-PARTY.txt",
+      "licenses\\opencv-python\\cv2\\LICENSE.txt",
+      "licenses\\opencv-python\\opencv_python-5.0.0.93.dist-info\\LICENSE-3RD-PARTY.txt",
+      "licenses\\opencv-python\\opencv_python-5.0.0.93.dist-info\\LICENSE.txt"
+    ],
+    "project_urls": [],
+    "homepage": "https://github.com/opencv/opencv-python"
+  },
+  {
+    "package": "numpy",
+    "version": "2.4.4",
+    "license_files": [
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\LICENSE.txt",
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\numpy\\_core\\include\\numpy\\libdivide\\LICENSE.txt",
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\numpy\\_core\\src\\common\\pythoncapi-compat\\COPYING",
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\numpy\\_core\\src\\highway\\LICENSE",
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\numpy\\_core\\src\\multiarray\\dragon4_LICENSE.txt",
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\numpy\\_core\\src\\npysort\\x86-simd-sort\\LICENSE.md",
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\numpy\\_core\\src\\umath\\svml\\LICENSE",
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\numpy\\fft\\pocketfft\\LICENSE.md",
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\numpy\\linalg\\lapack_lite\\LICENSE.txt",
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\numpy\\ma\\LICENSE",
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\numpy\\random\\LICENSE.md",
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\numpy\\random\\src\\distributions\\LICENSE.md",
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\numpy\\random\\src\\mt19937\\LICENSE.md",
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\numpy\\random\\src\\pcg64\\LICENSE.md",
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\numpy\\random\\src\\philox\\LICENSE.md",
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\numpy\\random\\src\\sfc64\\LICENSE.md",
+      "licenses\\numpy\\numpy-2.4.4.dist-info\\licenses\\numpy\\random\\src\\splitmix64\\LICENSE.md",
+      "licenses\\numpy\\numpy\\_core\\include\\numpy\\random\\LICENSE.txt",
+      "licenses\\numpy\\numpy\\ma\\LICENSE",
+      "licenses\\numpy\\numpy\\random\\LICENSE.md"
+    ],
+    "project_urls": [
+      "homepage, https://numpy.org",
+      "documentation, https://numpy.org/doc/",
+      "source, https://github.com/numpy/numpy",
+      "download, https://pypi.org/project/numpy/#files",
+      "tracker, https://github.com/numpy/numpy/issues",
+      "release notes, https://numpy.org/doc/stable/release"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "Pillow",
+    "version": "12.2.0",
+    "license_files": [
+      "licenses\\Pillow\\pillow-12.2.0.dist-info\\licenses\\LICENSE"
+    ],
+    "project_urls": [
+      "Release notes, https://pillow.readthedocs.io/en/stable/releasenotes/index.html",
+      "Changelog, https://github.com/python-pillow/Pillow/releases",
+      "Documentation, https://pillow.readthedocs.io",
+      "Funding, https://tidelift.com/subscription/pkg/pypi-pillow?utm_source=pypi-pillow&utm_medium=pypi",
+      "Homepage, https://python-pillow.github.io",
+      "Mastodon, https://fosstodon.org/@pillow",
+      "Source, https://github.com/python-pillow/Pillow"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "httpx",
+    "version": "0.28.1",
+    "license_files": [
+      "licenses\\httpx\\httpx-0.28.1.dist-info\\licenses\\LICENSE.md"
+    ],
+    "project_urls": [
+      "Changelog, https://github.com/encode/httpx/blob/master/CHANGELOG.md",
+      "Documentation, https://www.python-httpx.org",
+      "Homepage, https://github.com/encode/httpx",
+      "Source, https://github.com/encode/httpx"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "httpcore",
+    "version": "1.0.9",
+    "license_files": [
+      "licenses\\httpcore\\httpcore-1.0.9.dist-info\\licenses\\LICENSE.md"
+    ],
+    "project_urls": [
+      "Documentation, https://www.encode.io/httpcore",
+      "Homepage, https://www.encode.io/httpcore/",
+      "Source, https://github.com/encode/httpcore"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "certifi",
+    "version": "2026.2.25",
+    "license_files": [
+      "licenses\\certifi\\certifi-2026.2.25.dist-info\\licenses\\LICENSE"
+    ],
+    "project_urls": [
+      "Source, https://github.com/certifi/python-certifi"
+    ],
+    "homepage": "https://github.com/certifi/python-certifi"
+  },
+  {
+    "package": "pyclipper",
+    "version": "1.4.0",
+    "license_files": [
+      "licenses\\pyclipper\\pyclipper-1.4.0.dist-info\\licenses\\LICENSE"
+    ],
+    "project_urls": [],
+    "homepage": "https://github.com/fonttools/pyclipper"
+  },
+  {
+    "package": "Shapely",
+    "version": "2.1.2",
+    "license_files": [
+      "licenses\\Shapely\\shapely-2.1.2.dist-info\\licenses\\LICENSE.txt",
+      "licenses\\Shapely\\shapely-2.1.2.dist-info\\licenses\\LICENSE_GEOS",
+      "licenses\\Shapely\\shapely-2.1.2.dist-info\\licenses\\LICENSE_win32"
+    ],
+    "project_urls": [
+      "Documentation, https://shapely.readthedocs.io/",
+      "Repository, https://github.com/shapely/shapely"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "PyYAML",
+    "version": "6.0.3",
+    "license_files": [
+      "licenses\\PyYAML\\pyyaml-6.0.3.dist-info\\licenses\\LICENSE"
+    ],
+    "project_urls": [
+      "Bug Tracker, https://github.com/yaml/pyyaml/issues",
+      "CI, https://github.com/yaml/pyyaml/actions",
+      "Documentation, https://pyyaml.org/wiki/PyYAMLDocumentation",
+      "Mailing lists, http://lists.sourceforge.net/lists/listinfo/yaml-core",
+      "Source Code, https://github.com/yaml/pyyaml"
+    ],
+    "homepage": "https://pyyaml.org/"
+  },
+  {
+    "package": "six",
+    "version": "1.17.0",
+    "license_files": [
+      "licenses\\six\\six-1.17.0.dist-info\\LICENSE"
+    ],
+    "project_urls": [],
+    "homepage": "https://github.com/benjaminp/six"
+  },
+  {
+    "package": "anyio",
+    "version": "4.13.0",
+    "license_files": [
+      "licenses\\anyio\\anyio-4.13.0.dist-info\\licenses\\LICENSE"
+    ],
+    "project_urls": [
+      "Documentation, https://anyio.readthedocs.io/en/latest/",
+      "Changelog, https://anyio.readthedocs.io/en/stable/versionhistory.html",
+      "Source code, https://github.com/agronholm/anyio",
+      "Issue tracker, https://github.com/agronholm/anyio/issues"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "idna",
+    "version": "3.12",
+    "license_files": [
+      "licenses\\idna\\idna-3.12.dist-info\\licenses\\LICENSE.md"
+    ],
+    "project_urls": [
+      "Changelog, https://github.com/kjd/idna/blob/master/HISTORY.rst",
+      "Issue tracker, https://github.com/kjd/idna/issues",
+      "Source, https://github.com/kjd/idna"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "h11",
+    "version": "0.16.0",
+    "license_files": [
+      "licenses\\h11\\h11-0.16.0.dist-info\\licenses\\LICENSE.txt"
+    ],
+    "project_urls": [],
+    "homepage": "https://github.com/python-hyper/h11"
+  },
+  {
+    "package": "sniffio",
+    "version": "1.3.1",
+    "license_files": [
+      "licenses\\sniffio\\sniffio-1.3.1.dist-info\\LICENSE",
+      "licenses\\sniffio\\sniffio-1.3.1.dist-info\\LICENSE.APACHE2",
+      "licenses\\sniffio\\sniffio-1.3.1.dist-info\\LICENSE.MIT"
+    ],
+    "project_urls": [
+      "Homepage, https://github.com/python-trio/sniffio",
+      "Documentation, https://sniffio.readthedocs.io/",
+      "Changelog, https://sniffio.readthedocs.io/en/latest/history.html"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "coloredlogs",
+    "version": "15.0.1",
+    "license_files": [
+      "licenses\\coloredlogs\\coloredlogs-15.0.1.dist-info\\LICENSE.txt"
+    ],
+    "project_urls": [],
+    "homepage": "https://coloredlogs.readthedocs.io"
+  },
+  {
+    "package": "humanfriendly",
+    "version": "10.0",
+    "license_files": [
+      "licenses\\humanfriendly\\humanfriendly-10.0.dist-info\\LICENSE.txt"
+    ],
+    "project_urls": [],
+    "homepage": "https://humanfriendly.readthedocs.io"
+  },
+  {
+    "package": "flatbuffers",
+    "version": "25.12.19",
+    "license_files": [
+      "licenses/flatbuffers-APACHE-2.0.txt"
+    ],
+    "project_urls": [
+      "Documentation, https://google.github.io/flatbuffers/",
+      "Source, https://github.com/google/flatbuffers"
+    ],
+    "homepage": "https://google.github.io/flatbuffers/"
+  },
+  {
+    "package": "protobuf",
+    "version": "7.34.1",
+    "license_files": [
+      "licenses\\protobuf\\protobuf-7.34.1.dist-info\\LICENSE"
+    ],
+    "project_urls": [],
+    "homepage": "https://developers.google.com/protocol-buffers/"
+  },
+  {
+    "package": "sympy",
+    "version": "1.14.0",
+    "license_files": [
+      "licenses\\sympy\\sympy-1.14.0.dist-info\\licenses\\AUTHORS",
+      "licenses\\sympy\\sympy-1.14.0.dist-info\\licenses\\LICENSE",
+      "licenses\\sympy\\sympy\\parsing\\latex\\LICENSE.txt"
+    ],
+    "project_urls": [
+      "Source, https://github.com/sympy/sympy"
+    ],
+    "homepage": "https://sympy.org"
+  },
+  {
+    "package": "mpmath",
+    "version": "1.3.0",
+    "license_files": [
+      "licenses\\mpmath\\mpmath-1.3.0.dist-info\\LICENSE"
+    ],
+    "project_urls": [
+      "Source, https://github.com/fredrik-johansson/mpmath",
+      "Tracker, https://github.com/fredrik-johansson/mpmath/issues",
+      "Documentation, http://mpmath.org/doc/current/"
+    ],
+    "homepage": "http://mpmath.org/"
+  },
+  {
+    "package": "packaging",
+    "version": "26.1",
+    "license_files": [
+      "licenses\\packaging\\packaging-26.1.dist-info\\licenses\\LICENSE",
+      "licenses\\packaging\\packaging-26.1.dist-info\\licenses\\LICENSE.APACHE",
+      "licenses\\packaging\\packaging-26.1.dist-info\\licenses\\LICENSE.BSD"
+    ],
+    "project_urls": [
+      "Documentation, https://packaging.pypa.io/",
+      "Source, https://github.com/pypa/packaging"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "tkinterdnd2",
+    "version": "0.4.3",
+    "license_files": [
+      "licenses\\tkinterdnd2\\tkinterdnd2-0.4.3.dist-info\\LICENSE"
+    ],
+    "project_urls": [],
+    "homepage": "https://github.com/Eliav2/tkinterdnd2"
+  },
+  {
+    "package": "pyinstaller",
+    "version": "6.21.0",
+    "license_files": [
+      "licenses\\pyinstaller\\pyinstaller-6.21.0.dist-info\\licenses\\COPYING.txt"
+    ],
+    "project_urls": [
+      "Homepage, https://pyinstaller.org",
+      "Documentation, https://pyinstaller.org",
+      "Source Code, https://github.com/pyinstaller/pyinstaller",
+      "Release Notes, https://pyinstaller.org/en/stable/CHANGES.html"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "Pygments",
+    "version": "2.21.0",
+    "license_files": [
+      "licenses\\Pygments\\pygments-2.21.0.dist-info\\licenses\\AUTHORS",
+      "licenses\\Pygments\\pygments-2.21.0.dist-info\\licenses\\LICENSE"
+    ],
+    "project_urls": [
+      "Homepage, https://pygments.org",
+      "Documentation, https://pygments.org/docs",
+      "Source, https://github.com/pygments/pygments",
+      "Bug Tracker, https://github.com/pygments/pygments/issues",
+      "Changelog, https://github.com/pygments/pygments/blob/master/CHANGES"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "attrs",
+    "version": "26.1.0",
+    "license_files": [
+      "licenses\\attrs\\attrs-26.1.0.dist-info\\licenses\\LICENSE"
+    ],
+    "project_urls": [
+      "Documentation, https://www.attrs.org/",
+      "Changelog, https://www.attrs.org/en/stable/changelog.html",
+      "GitHub, https://github.com/python-attrs/attrs",
+      "Funding, https://github.com/sponsors/hynek",
+      "Tidelift, https://tidelift.com/subscription/pkg/pypi-attrs?utm_source=pypi-attrs&utm_medium=pypi"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "beautifulsoup4",
+    "version": "4.14.3",
+    "license_files": [
+      "licenses\\beautifulsoup4\\beautifulsoup4-4.14.3.dist-info\\licenses\\AUTHORS",
+      "licenses\\beautifulsoup4\\beautifulsoup4-4.14.3.dist-info\\licenses\\LICENSE"
+    ],
+    "project_urls": [
+      "Download, https://www.crummy.com/software/BeautifulSoup/bs4/download/",
+      "Homepage, https://www.crummy.com/software/BeautifulSoup/bs4/"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "chardet",
+    "version": "6.0.0.post1",
+    "license_files": [
+      "licenses\\chardet\\chardet-6.0.0.post1.dist-info\\licenses\\LICENSE"
+    ],
+    "project_urls": [
+      "Documentation, https://chardet.readthedocs.io/",
+      "Homepage, http://chardet.github.io",
+      "Issues, https://github.com/chardet/chardet/issues",
+      "Repository, https://github.com/chardet/chardet"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "charset-normalizer",
+    "version": "3.4.7",
+    "license_files": [
+      "licenses\\charset-normalizer\\charset_normalizer-3.4.7.dist-info\\licenses\\LICENSE"
+    ],
+    "project_urls": [
+      "Changelog, https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md",
+      "Documentation, https://charset-normalizer.readthedocs.io/",
+      "Code, https://github.com/jawah/charset_normalizer",
+      "Issue tracker, https://github.com/jawah/charset_normalizer/issues"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "click",
+    "version": "8.5.0",
+    "license_files": [
+      "licenses\\click\\click-8.5.0.dist-info\\licenses\\LICENSE.txt"
+    ],
+    "project_urls": [
+      "Changes, https://click.palletsprojects.com/page/changes/",
+      "Chat, https://discord.gg/pallets",
+      "Documentation, https://click.palletsprojects.com/",
+      "Donate, https://palletsprojects.com/donate",
+      "Source, https://github.com/pallets/click/"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "defusedxml",
+    "version": "0.7.1",
+    "license_files": [
+      "licenses\\defusedxml\\defusedxml-0.7.1.dist-info\\LICENSE"
+    ],
+    "project_urls": [],
+    "homepage": "https://github.com/tiran/defusedxml"
+  },
+  {
+    "package": "fonttools",
+    "version": "4.62.1",
+    "license_files": [
+      "licenses\\fonttools\\fonttools-4.62.1.dist-info\\licenses\\LICENSE",
+      "licenses\\fonttools\\fonttools-4.62.1.dist-info\\licenses\\LICENSE.external"
+    ],
+    "project_urls": [],
+    "homepage": "http://github.com/fonttools/fonttools"
+  },
+  {
+    "package": "lxml",
+    "version": "6.1.0",
+    "license_files": [
+      "licenses\\lxml\\lxml-6.1.0.dist-info\\licenses\\LICENSE.txt",
+      "licenses\\lxml\\lxml-6.1.0.dist-info\\licenses\\LICENSES.txt"
+    ],
+    "project_urls": [
+      "Source, https://github.com/lxml/lxml",
+      "Bug Tracker, https://bugs.launchpad.net/lxml"
+    ],
+    "homepage": "https://lxml.de/"
+  },
+  {
+    "package": "markdown-it-py",
+    "version": "4.2.0",
+    "license_files": [
+      "licenses\\markdown-it-py\\markdown_it_py-4.2.0.dist-info\\licenses\\LICENSE",
+      "licenses\\markdown-it-py\\markdown_it_py-4.2.0.dist-info\\licenses\\LICENSE.markdown-it"
+    ],
+    "project_urls": [
+      "Documentation, https://markdown-it-py.readthedocs.io",
+      "Homepage, https://github.com/executablebooks/markdown-it-py"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "mdurl",
+    "version": "0.1.2",
+    "license_files": [
+      "licenses\\mdurl\\mdurl-0.1.2.dist-info\\LICENSE"
+    ],
+    "project_urls": [
+      "Homepage, https://github.com/executablebooks/mdurl"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "olefile",
+    "version": "0.47",
+    "license_files": [
+      "licenses\\olefile\\olefile-0.47.dist-info\\LICENSE.txt",
+      "licenses\\olefile\\olefile\\LICENSE.txt",
+      "licenses\\olefile\\olefile\\doc\\License.html",
+      "licenses\\olefile\\olefile\\doc\\License.md"
+    ],
+    "project_urls": [],
+    "homepage": "https://www.decalage.info/python/olefileio"
+  },
+  {
+    "package": "pillow",
+    "version": "12.2.0",
+    "license_files": [
+      "licenses\\pillow\\pillow-12.2.0.dist-info\\licenses\\LICENSE"
+    ],
+    "project_urls": [
+      "Release notes, https://pillow.readthedocs.io/en/stable/releasenotes/index.html",
+      "Changelog, https://github.com/python-pillow/Pillow/releases",
+      "Documentation, https://pillow.readthedocs.io",
+      "Funding, https://tidelift.com/subscription/pkg/pypi-pillow?utm_source=pypi-pillow&utm_medium=pypi",
+      "Homepage, https://python-pillow.github.io",
+      "Mastodon, https://fosstodon.org/@pillow",
+      "Source, https://github.com/python-pillow/Pillow"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "psutil",
+    "version": "7.2.2",
+    "license_files": [
+      "licenses\\psutil\\psutil-7.2.2.dist-info\\LICENSE"
+    ],
+    "project_urls": [],
+    "homepage": "https://github.com/giampaolo/psutil"
+  },
+  {
+    "package": "pyreadline3",
+    "version": "3.5.6",
+    "license_files": [
+      "licenses\\pyreadline3\\pyreadline3-3.5.6.dist-info\\licenses\\LICENSE.md"
+    ],
+    "project_urls": [
+      "Homepage, https://github.com/pyreadline3/pyreadline3",
+      "Documentation, https://github.com/pyreadline3/pyreadline3",
+      "Repository, https://github.com/pyreadline3/pyreadline3.git",
+      "Issues, https://github.com/pyreadline3/pyreadline3/issues",
+      "Changelog, https://github.com/pyreadline3/pyreadline3/blob/master/doc/ChangeLog"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "rich",
+    "version": "15.0.0",
+    "license_files": [
+      "licenses\\rich\\rich-15.0.0.dist-info\\licenses\\LICENSE"
+    ],
+    "project_urls": [
+      "Documentation, https://rich.readthedocs.io/en/latest/",
+      "Homepage, https://github.com/Textualize/rich"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "shapely",
+    "version": "2.1.2",
+    "license_files": [
+      "licenses\\shapely\\shapely-2.1.2.dist-info\\licenses\\LICENSE.txt",
+      "licenses\\shapely\\shapely-2.1.2.dist-info\\licenses\\LICENSE_GEOS",
+      "licenses\\shapely\\shapely-2.1.2.dist-info\\licenses\\LICENSE_win32"
+    ],
+    "project_urls": [
+      "Documentation, https://shapely.readthedocs.io/",
+      "Repository, https://github.com/shapely/shapely"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "soupsieve",
+    "version": "2.8.3",
+    "license_files": [
+      "licenses\\soupsieve\\soupsieve-2.8.3.dist-info\\licenses\\LICENSE.md"
+    ],
+    "project_urls": [
+      "Homepage, https://github.com/facelessuser/soupsieve"
+    ],
+    "homepage": ""
+  },
+  {
+    "package": "threadpoolctl",
+    "version": "3.6.0",
+    "license_files": [
+      "licenses\\threadpoolctl\\threadpoolctl-3.6.0.dist-info\\licenses\\LICENSE"
+    ],
+    "project_urls": [],
+    "homepage": "https://github.com/joblib/threadpoolctl"
+  },
+  {
+    "package": "typing_extensions",
+    "version": "4.15.0",
+    "license_files": [
+      "licenses\\typing_extensions\\typing_extensions-4.15.0.dist-info\\licenses\\LICENSE"
+    ],
+    "project_urls": [
+      "Bug Tracker, https://github.com/python/typing_extensions/issues",
+      "Changes, https://github.com/python/typing_extensions/blob/main/CHANGELOG.md",
+      "Documentation, https://typing-extensions.readthedocs.io/",
+      "Home, https://github.com/python/typing_extensions",
+      "Q & A, https://github.com/python/typing/discussions",
+      "Repository, https://github.com/python/typing_extensions"
+    ],
+    "homepage": ""
+  }
+]
