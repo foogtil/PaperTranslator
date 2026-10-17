@@ -142,7 +142,7 @@ def main():
     source_archive(source)
     shutil.copy2(dist / "PaperTranslator-Standalone.exe", destination / "PaperTranslator-Standalone.exe")
     portable = dist / "PaperTranslator"
-    for name in ("README.md", "DEFAULTS.md", "TESTING.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
+    for name in ("README.md", "README.zh-CN.md", "DEFAULTS.md", "TESTING.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"):
         shutil.copy2(ROOT / name, portable / name)
     shutil.copytree(ROOT / "licenses", portable / "licenses", dirs_exist_ok=True)
     shutil.copy2(source, portable / source.name)
