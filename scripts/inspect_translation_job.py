@@ -1,4 +1,8 @@
-"""Read-only job diagnostics; never read settings or credentials."""
+"""Read-only job diagnostics; never read settings or credentials.
+
+Usage:
+    python scripts/inspect_translation_job.py <project.json|directory> [glob]
+"""
 from __future__ import annotations
 
 from collections import Counter
@@ -9,7 +13,8 @@ import sys
 import pymupdf
 
 root = Path(sys.argv[1])
-paths = [root] if root.is_file() else sorted(root.glob("*EDG*.ptrans.json"))
+pattern = sys.argv[2] if len(sys.argv) > 2 else "*.ptrans.json"
+paths = [root] if root.is_file() else sorted(root.glob(pattern))
 for path in paths:
     data = json.loads(path.read_text(encoding="utf-8"))
     blocks = data.get("blocks", [])
