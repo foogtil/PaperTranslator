@@ -13,6 +13,94 @@ CAPTION = re.compile(r"^\s*(?:fig(?:ure)?\.?\s*\d+[a-z]?|图\s*[一二三四五�
 MATH_MARKER = re.compile(r"\[\[MATH_\d+\]\]")
 
 
+def attach_math_satellites(data, hard_protected):
+    """Attach small accent/script PDF blocks to an adjacent prose baseline.
+
+    PDF object boundaries are not mathematical boundaries. Never attach across
+    columns, or across a blank line separating a display equation from prose.
+    """
+    bodies, satellites = [], []
+    for raw in data["blocks"]:
+        if raw.get("type") != 0 or raw.get('table_cell') or any(abs(l["dir"][0] - 1) > .01 or l.get("wmode") for l in raw["lines"]):
+            continue
+        spans = [(l, s, "".join(c["c"] for c in s["chars"]).strip()) for l in raw["lines"] for s in l["spans"]]
+        typical = max((s["size"] for _, s, t in spans if t), default=10)
+        prose = [(l, s, t) for l, s, t in spans if re.search(r"[A-Za-z]{3,}|[\u3400-\u9fff]{2,}", t)
+                 and not hard_protected(s, t, typical) and s["size"] >= typical * .85]
+        if sum(len(re.findall(r"[A-Za-z]{3,}|[\u3400-\u9fff]{2,}", t)) for _, _, t in prose) >= 3:
+            bodies.append((raw, prose))
+        elif not prose and any(hard_protected(s, t, typical) for _, s, t in spans if t):
+            satellites.append((raw, spans))
+    removed = set()
+    # A superscript can make MuPDF start a second raw block in the middle of
+    # one visual line. Join only tightly adjacent fragments bridged by math.
+    short_bodies = [(raw, prose) for raw, prose in bodies
+                    if fitz.Rect(raw["bbox"]).height < max(s["size"] for _, s, _ in prose) * 2.2]
+    for body, prose in short_bodies:
+        if id(body) in removed:
+            continue
+        for other, other_prose in short_bodies:
+            if body is other or id(other) in removed:
+                continue
+            a, b = fitz.Rect(body["bbox"]), fitz.Rect(other["bbox"])
+            size = max(s["size"] for _, s, _ in prose + other_prose)
+            if not (0 <= b.x0 - a.x1 < size * 1.2 and max(a.height, b.height) < size * 2.2):
+                continue
+            if min(abs(s["origin"][1] - p["origin"][1]) for _, s, _ in prose for _, p, _ in other_prose) > size * .2:
+                continue
+            edge_spans = [s for line in body["lines"] for s in line["spans"] if s["bbox"][2] > a.x1 - size * 1.2]
+            if not any(hard_protected(s, "".join(c["c"] for c in s["chars"]), size) for s in edge_spans):
+                continue
+            body["lines"].extend(other["lines"])
+            body["bbox"] = tuple(a | b)
+            prose.extend(other_prose)
+            removed.add(id(other))
+    for raw, spans in satellites:
+        r = fitz.Rect(raw["bbox"])
+        candidates = []
+        for body, prose in bodies:
+            if id(body) in removed:
+                continue
+            br = fitz.Rect(body["bbox"])
+            if r.x0 < br.x0 - 2 or r.x1 > br.x1 + 2:
+                continue
+            distance = min(abs(s["origin"][1] - p["origin"][1]) / max(s["size"], p["size"])
+                           for _, s, t in spans if t for _, p, _ in prose)
+            if distance < .55 and r.y0 >= br.y0 - 4 and r.y1 <= br.y1 + 4:
+                candidates.append((distance, body))
+        if candidates:
+            body = min(candidates, key=lambda pair: pair[0])[1]
+            body["lines"].extend(raw["lines"])
+            body["bbox"] = tuple(fitz.Rect(body["bbox"]) | r)
+            removed.add(id(raw))
+    data["blocks"] = [raw for raw in data["blocks"] if id(raw) not in removed]
+
+
+def display_math_groups(runs):
+    """Keep equation labels out of fraction denominators and other math runs."""
+    prose = [r for r in runs if not r[3] and re.search(r"[A-Za-z]{3,}|[\u3400-\u9fff]{2,}", r[2])
+             and not re.fullmatch(r"[A-Z]{2,12}", r[2].strip())]
+    words = sum(len(re.findall(r"[A-Za-z]{3,}|[\u3400-\u9fff]{2,}", r[2])) for r in prose)
+    if words > 4 or sum(r[3] for r in runs) < 3 or sum(r[3] for r in runs) < len(runs) * .45:
+        return None
+    typical = max(r[1]["size"] for r in runs)
+    bases = [r[1]["origin"][1] for r in runs if r[3] and r[1]["size"] >= typical * .9 and not r[1].get("flags", 0) & 1]
+    if bases and any(abs(r[1]["origin"][1] - statistics.median(bases)) < typical * .6 for r in prose):
+        return None  # Prose on the equation baseline is an inline sentence.
+    # A short sentence with an inline equation is still a paragraph.
+    if any(re.search(r"[.!?。！？]", r[2]) for r in prose):
+        return None
+    labels = {id(r[1]) for r in prose}
+    math = [(l, s, t, True) for l, s, t, _ in runs if id(s) not in labels]
+    groups = [math] if math else []
+    for run in prose:
+        if len(groups) > 1 and run[0] is groups[-1][-1][0]:
+            groups[-1].append(run)
+        else:
+            groups.append([run])
+    return groups
+
+
 def inside(rect, container, threshold=0.65):
     rect, container = fitz.Rect(rect), fitz.Rect(container)
     return (rect & container).get_area() / max(0.01, rect.get_area()) >= threshold
@@ -82,9 +170,10 @@ def logical_rows(raw, hard_protected, figures=()):
     typical = sizes.most_common(1)[0][0]
     prose_baselines = [r for r in runs if re.search(r"[A-Za-z]{3,}|[\u3400-\u9fff]{2,}", r[2])
                        and not hard_protected(r[1], r[2], typical)]
-    prose_block = (len(re.findall(r"[A-Za-z]{3,}|[\u3400-\u9fff]{2,}", " ".join(r[2] for r in runs))) >= 12
-                   and fitz.Rect(raw["bbox"]).width < 350 and not any(inside(raw["bbox"], f) for f in figures))
-    baseline_runs = (prose_baselines or runs) if prose_block else runs
+    word_count = len(re.findall(r"[A-Za-z]{3,}|[\u3400-\u9fff]{2,}", " ".join(r[2] for r in runs)))
+    prose_block = (word_count >= 12
+                   and not any(inside(raw["bbox"], f) for f in figures))
+    baseline_runs = (prose_baselines or runs) if word_count >= 5 else runs
     baselines = []
     for _, span, _ in sorted(baseline_runs, key=lambda r: r[1]["origin"][1]):
         y = span["origin"][1]
@@ -105,6 +194,17 @@ def logical_rows(raw, hard_protected, figures=()):
         parts = [(line, span, value, hard_protected(span, value, row_typical) or span["size"] < row_typical * 0.85
                   or any(ord(c) < 32 and not c.isspace() for c in value)) for line, span, value, _ in parts]
         parts.sort(key=lambda r: (r[1]["bbox"][0], r[1]["origin"][1]))
+        # Upright digits and parentheses between math spans are part of the
+        # same expression, even when the PDF uses the ordinary body font.
+        for i, (line, span, value, hard) in enumerate(parts):
+            if hard or not re.fullmatch(r"[\d\s,:;=+−\-*/()\[\]{}|<>.]+", value.strip()):
+                continue
+            if not re.search(r"[\d=+−\-*/()\[\]{}|<>]", value):
+                continue
+            adjacent = [p for j, p in enumerate(parts) if abs(j - i) == 1 and p[3]
+                        and max(p[1]["bbox"][0] - span["bbox"][2], span["bbox"][0] - p[1]["bbox"][2]) < row_typical * .6]
+            if adjacent:
+                parts[i] = (line, span, value, True)
         current = []
         for part in parts:
             # Distant columns and table cells remain distinct.
@@ -187,14 +287,31 @@ def paragraph_template(runs, run_text):
         for run in group[1:]:
             rect |= fitz.Rect(run[1]["bbox"])
         marker = f"[[MATH_{len(inline)}]]"
-        inline.append({"marker": marker, "rect": list(rect), "text": run_text(group)})
+        # Use the actual non-space glyph extent, excluding large PDF space
+        # boxes which can otherwise copy neighbouring prose into a formula.
+        chars = [c for _, span, _, _ in group for c in span.get("chars", []) if not c["c"].isspace()]
+        if chars:
+            rect = fitz.Rect(chars[0]["bbox"])
+            for char in chars[1:]:
+                rect |= fitz.Rect(char["bbox"])
+        typical = max(r[1]["size"] for r in group)
+        bases = [span["origin"][1] for _, span, value, _ in group if span["size"] >= typical * .85
+                 and not span.get("flags", 0) & 1 and not re.fullmatch(r"[ˆ̂ˇ˘˙¨¯⃗]+", value.strip())]
+        baseline = statistics.median(bases or [r[1]["origin"][1] for r in group])
+        prose_bases = [span["origin"][1] for _, span, _, hard in runs if not hard
+                       and abs(span["origin"][1] - baseline) < typical * .6]
+        if prose_bases:
+            baseline = min(prose_bases, key=lambda y: abs(y - baseline))
+        inline.append({"marker": marker, "rect": list(rect), "text": run_text(group), "baseline": baseline})
         for i, (line, span, _, hard) in enumerate(group):
             modified.append((line, span, marker if i == 0 else "", hard))
         group.clear()
     for run in runs:
         if run[3]:
             overlap = min(run[1]["bbox"][2], group[-1][1]["bbox"][2]) - max(run[1]["bbox"][0], group[-1][1]["bbox"][0]) if group else 0
-            if group and overlap <= 0 and abs(run[1]["origin"][1] - group[-1][1]["origin"][1]) > max(run[1]["size"], group[-1][1]["size"]) * 0.9:
+            group_size = max([run[1]["size"]] + [r[1]["size"] for r in group])
+            if group and overlap <= 0 and (abs(run[1]["origin"][1] - group[-1][1]["origin"][1]) > group_size * 0.9
+                    or run[1]["bbox"][0] - group[-1][1]["bbox"][2] > group_size * 1.2):
                 flush()
             group.append(run)
         else:
@@ -214,7 +331,7 @@ def assign_units(project, figures_by_page=None):
             b.unit_id = ""
         figures = []
         for n, rect in enumerate(figures_by_page.get(page, [])):
-            members = [b for b in blocks if inside(b.rect, rect)]
+            members = [b for b in blocks if b.role != 'table_cell' and inside(b.rect, rect)]
             unit = Unit(f"p{page + 1}-figure{n + 1}", page, "figure", list(rect), f"图片 {n + 1}")
             for b in members:
                 b.unit_id, b.role = unit.id, "figure_label"
@@ -254,7 +371,7 @@ def unit_counts(project):
 
 
 def join_continuations(blocks, figures):
-    """Reconnect a paragraph fragmented across PDF objects by inline mathematics."""
+    """Reconnect tightly adjacent prose fragments, including short title tails."""
     result = []
     for block in blocks:
         if not result:
@@ -265,13 +382,14 @@ def join_continuations(blocks, figures):
         size = max(previous.fontsize, block.fontsize)
         start = re.search(r"[A-Za-z\u3400-\u9fff]", block.text)
         can_join = (not previous.protected and not block.protected and previous.kind == block.kind == "native"
+                    and previous.role != 'table_cell' and block.role != 'table_cell'
                     and previous.angle == block.angle == 0 and not previous.bold and not block.bold
-                    and min(a.width, b.width) > size * 10 and abs(a.x0 - b.x0) < size * 2
+                    and a.width > size * 10 and b.width > size * 3 and abs(a.x0 - b.x0) < size * 2
                     and -size * 2 < b.y0 - a.y1 < size * 1.8 and b.y1 > a.y1
                     and abs(previous.fontsize - block.fontsize) < size * 0.15
                     and not re.search(r"[.!?:;。！？：；][\"'’”)]*$", previous.text.rstrip())
                     and start and start.group().islower()
-                    and not any(inside(a, f) or inside(b, f) for f in figures))
+                    and not any(inside(a, f) and inside(b, f) for f in figures))
         if not can_join:
             result.append(block)
             continue
@@ -283,6 +401,7 @@ def join_continuations(blocks, figures):
         previous.inline.extend({**item, "marker": replacements[item["marker"]]} for item in block.inline)
         previous.text = previous.text.rstrip() + " " + block.text.lstrip()
         previous.erasers.extend(block.erasers)
+        previous.glyphs.extend(block.glyphs)
         rect = a | b
         previous.rect = list(rect)
         previous.quad = [list(rect.tl), list(rect.tr), list(rect.br), list(rect.bl)]
@@ -293,7 +412,7 @@ def join_continuations(blocks, figures):
 
 def merge_ocr_paragraphs(blocks, figures):
     """Group adjacent OCR body lines, while keeping figure label coordinates."""
-    eligible = [b for b in blocks if b.kind == "raster" and not b.protected and b.angle % 360 < 1
+    eligible = [b for b in blocks if b.kind == "raster" and not b.protected and b.status != 'edited' and not b.approved and '-m' not in b.id and b.angle % 360 < 1
                 and not b.vertical and not any(inside(b.rect, f) for f in figures)]
     eligible.sort(key=lambda b: (b.rect[1], b.rect[0]))
     groups = []

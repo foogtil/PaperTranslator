@@ -10,7 +10,7 @@ import pymupdf as fitz
 from .api import APIError, ChatClient
 from .extraction import OCR, analyze, coverage, crop_png
 from .layout import export_pdf
-from .models import Block, Options, Project, Provider, checkpoint
+from .models import Block, Options, Project, Provider, checkpoint, has_translation, block_enabled
 from .translation import TOKEN, is_protected, translate_project
 from .structure import assign_units, unit_counts
 from .settings import data_dir
@@ -24,26 +24,46 @@ def project_path(source: str, output_dir: str) -> Path:
 
 def cached_project_path(source: str, output_dir: str) -> Path:
     from hashlib import sha256
-    import os
-    identity = "\0".join(os.path.normcase(str(Path(p).resolve())) for p in (source, output_dir))
-    key = sha256(identity.encode("utf-8")).hexdigest()[:20]
+    from .locking import identity
+    key = sha256(identity(source).encode('utf-8')).hexdigest()[:20]
     return data_dir() / "jobs" / key / "project.ptrans.json"
 
 
-def resume_project_path(source: str, output_dir: str) -> Path:
-    """Copy a newer legacy snapshot into internal storage without moving it."""
-    cache, legacy = cached_project_path(source, output_dir), project_path(source, output_dir)
-    if legacy.is_file() and (not cache.exists() or legacy.stat().st_mtime_ns > cache.stat().st_mtime_ns):
-        project = Project.load(legacy)
-        if Path(project.source).resolve() != Path(source).resolve():
-            raise ValueError("旧项目与当前原 PDF 不对应，请重新选择项目。")
-        project.save(cache)
-    return cache
+def resume_project_path(source: str, output_dir: str, preferred: str | None = None) -> Path:
+    """Use the explicitly opened project, or migrate an old output-scoped job."""
+    from .locking import identity, job_lock
+    with job_lock(source):
+        cache = cached_project_path(source, output_dir)
+        if preferred:
+            selected = Path(preferred)
+            project = Project.load(selected, verify=False)
+            if identity(project.source) != identity(source):
+                raise ValueError('已打开项目与当前原 PDF 不对应，请重新选择项目。')
+            if identity(selected) != identity(cache):
+                project.save(cache)
+            return cache
+        if cache.is_file():
+            return cache
+        legacy = project_path(source, output_dir)
+        candidates = list((data_dir() / 'jobs').glob('*/project.ptrans.json'))
+        if legacy.is_file():
+            candidates.append(legacy)
+        for path in sorted(candidates, key=lambda p: p.stat().st_mtime_ns, reverse=True):
+            try:
+                project = Project.load(path, verify=False)
+                if identity(project.source) != identity(source):
+                    continue
+            except (ValueError, OSError, TypeError, KeyError):
+                continue
+            project.save(cache)
+            break
+        return cache
 
 
 def estimate(project: Project, provider: Provider, options: Options) -> dict:
-    count = sum(len(b.text) for b in project.blocks if not b.protected)
-    regions = sum(not b.protected for b in project.blocks)
+    active = [b for b in project.blocks if (not project.pages or b.page in project.selected_pages) and block_enabled(b, options)]
+    count = sum(len(b.text) for b in active if not b.protected)
+    regions = sum(not b.protected for b in active)
     counts = unit_counts(project)
     # Explicit estimates, never presented as measured token usage or a quote.
     input_tokens = int(count / 2.5 + regions * 90)
@@ -57,23 +77,29 @@ def estimate(project: Project, provider: Provider, options: Options) -> dict:
 
 
 class Engine:
-    def __init__(self, log=None, cancel=None, progress=None):
+    def __init__(self, log=None, cancel=None, progress=None, on_usage=None):
         self.log = log or (lambda text: None)
         self.cancel = cancel or threading.Event()
         self.progress = progress
+        self.on_usage = on_usage or (lambda data: None)
         self.ocr = OCR()
 
     def analyze(self, source, options, path):
         return analyze(source, options, str(path), self.cancel, self.log, self.ocr)
 
     def translate(self, project: Project, options: Options, provider: Provider, path):
+        state_lock = threading.RLock()
         def save():
-            project.save(path)
+            with state_lock:
+                project.save(path)
 
         def usage(data):
-            for key, value in data.items():
-                project.usage[key] = project.usage.get(key, 0) + value
+            with state_lock:
+                for key, value in data.items():
+                    project.usage[key] = project.usage.get(key, 0) + value
+                self.on_usage(dict(project.usage))
 
+        self.on_usage(dict(project.usage))
         client = ChatClient(provider, self.cancel, on_usage=usage, on_log=self.log)
         try:
             if options.vision_review and provider.vision:
@@ -88,11 +114,24 @@ class Engine:
                         page.set_rotation(0)
                         try:
                             width, height = page.rect.width, page.rect.height
+                            from .structure import figure_rects, inside
+                            figures = figure_rects(page)
                             existing_blocks = [b for b in project.blocks if b.page == index]
                             existing = [{"text": b.text[:160], "bbox": [b.rect[0] / width * 1000, b.rect[1] / height * 1000, b.rect[2] / width * 1000, b.rect[3] / height * 1000]} for b in existing_blocks]
                             self.log(f"视觉检查第 {index + 1} 页的漏识别、旋转及竖排文字。")
                             pix = page.get_pixmap(matrix=fitz.Matrix(min(220 / 72, 2400 / max(width, height)), min(220 / 72, 2400 / max(width, height))), alpha=False)
-                            result = client.read_layout(pix.tobytes("png"), existing)
+                            if not options.translate_figures:
+                                import io
+                                from PIL import Image
+                                from .extraction import mask_figures
+                                image = Image.frombytes('RGB', (pix.width, pix.height), pix.samples)
+                                mask_figures(image, figures, min(220 / 72, 2400 / max(width, height)))
+                                stream = io.BytesIO()
+                                image.save(stream, format='PNG')
+                                png = stream.getvalue()
+                            else:
+                                png = pix.tobytes('png')
+                            result = client.read_layout(png, existing)
                             for region in result["regions"][:500]:
                                 if not isinstance(region, dict) or not isinstance(region.get("text"), str):
                                     continue
@@ -108,6 +147,8 @@ class Engine:
                                 if not all(math.isfinite(v) for v in box + [angle, confidence]) or not (0 <= box[0] < box[2] <= 1000 and 0 <= box[1] < box[3] <= 1000):
                                     continue
                                 rect = [box[0] * width / 1000, box[1] * height / 1000, box[2] * width / 1000, box[3] * height / 1000]
+                                if not options.translate_figures and any(inside(rect, f) for f in figures):
+                                    continue
                                 if any(coverage(rect, b.rect) > 0.55 for b in project.blocks if b.page == index):
                                     continue
                                 rw, rh = rect[2] - rect[0], rect[3] - rect[1]
@@ -139,7 +180,7 @@ class Engine:
                     for b in project.blocks:
                         if vision_failed:
                             break
-                        if b.kind != "raster" or b.role == "figure_label" or b.protected or b.status in ("translated", "edited", "preserved"):
+                        if b.page not in project.selected_pages or b.kind != "raster" or b.role == "figure_label" or b.protected or has_translation(b):
                             continue
                         if b.confidence >= 0.96 and not b.notes:
                             continue
@@ -177,7 +218,7 @@ class Engine:
                             vision_failed = True
                         finally:
                             page.set_rotation(rotation)
-            translate_project(project, options, client, save, self.log)
+            translate_project(project, options, client, save, self.log, state_lock=state_lock)
         finally:
             client.close()
             save()

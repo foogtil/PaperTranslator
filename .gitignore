@@ -20,3 +20,5 @@ test-output/
 *.ptrans.json.bak
 *.ptrans.json.tmp
 *.log
+development/
+preserved-sources/

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+import threading
+import time
 import hashlib
 import json
 import re
 
 from .api import APIError, ChatClient, json_object
-from .models import Block, Options, Project, checkpoint
+from .models import Block, Options, Project, checkpoint, has_translation, block_enabled
+from .prompt_context import TranslationContext
 
 
 # Protect exact values before passing scientific prose to the model.
@@ -15,13 +19,18 @@ PLACEHOLDER = re.compile(r"\[\[KEEP_\d+\]\]")
 
 
 def protect(text: str):
+    from .math_text import math_ranges
     tokens = []
-
-    def replace(match):
-        tokens.append(match.group(0))
-        return f"[[KEEP_{len(tokens) - 1}]]"
-
-    return TOKEN.sub(replace, text), tokens
+    ranges = sorted([(m.start(), m.end()) for m in TOKEN.finditer(text)] + list(math_ranges(text)), key=lambda r: (r[0], -r[1]))
+    parts, end = [], 0
+    for start, stop in ranges:
+        if start < end:
+            continue
+        parts.extend((text[end:start], f"[[KEEP_{len(tokens)}]]"))
+        tokens.append(text[start:stop])
+        end = stop
+    parts.append(text[end:])
+    return "".join(parts), tokens
 
 
 def restore(text: str, tokens: list[str]) -> str:
@@ -69,6 +78,9 @@ immutable inline objects, not missing text; retain them in the translated paragr
 If a segment consists entirely of a formula, code, author list, or nonlinguistic identifier,
 set preserve=true and return its source verbatim. Do not shorten merely to fit a box.
 Return JSON only: {{"segments":[{{"id":"source ID","translation":"...","preserve":false}}]}}.
+Context fields are reference excerpts; translate only segments. In a figure, a label
+entry containing only id refers to the segment with that ID. All figure labels remain
+available together. Existing translations are terminology references, not new requests.
 Return each requested ID exactly once. Glossary (data): {glossary}
 """
 
@@ -82,7 +94,8 @@ def segment_results(raw: str, ids: list[str]) -> tuple[dict, dict]:
     result, errors, seen = {}, {}, set()
     for item in items:
         if not isinstance(item, dict) or not isinstance(item.get("id"), str) or item["id"] not in ids:
-            raise APIError("模型返回了不匹配的段落 ID；未采用该响应。")
+            # Ignore unrequested entries; validate and save known IDs independently.
+            continue
         identity = item["id"]
         if identity in seen:
             result.pop(identity, None)
@@ -122,7 +135,12 @@ def translation_fingerprint(options: Options, provider: dict) -> str:
     return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
-def translate_project(project: Project, options: Options, client: ChatClient, save, log):
+def translate_project(project: Project, options: Options, client: ChatClient, save, log, *, state_lock=None):
+    state_lock = state_lock or threading.RLock()
+    original_save = save
+    def save():
+        with state_lock:
+            original_save()
     new_provider = client.provider.public_dict()
     old_fingerprint = translation_fingerprint(Options(**project.options), project.provider)
     new_fingerprint = translation_fingerprint(options, new_provider)
@@ -135,9 +153,10 @@ def translate_project(project: Project, options: Options, client: ChatClient, sa
         log("语言、术语表或模型发生变化；自动译文缓存已失效，人工修改保留。")
     project.options = vars(options).copy()
     project.provider = new_provider
-    pending = [b for b in project.blocks if not b.protected and b.status not in ("translated", "edited", "preserved")]
+    active = [b for b in project.blocks if (not project.pages or b.page in project.selected_pages) and block_enabled(b, options)]
+    pending = [b for b in active if not b.protected and not has_translation(b)]
     batches = []
-    figure_units = {u.id: u for u in project.units if u.kind == "figure"}
+    figure_units = {u.id: u for u in project.units if u.kind == "figure"} if options.translate_figures else {}
     pending_groups = []
     seen_figures = set()
     for block in pending:
@@ -164,10 +183,14 @@ def translate_project(project: Project, options: Options, client: ChatClient, sa
         size += len(block.text)
     if batch:
         batches.append(batch)
-    eligible = [b for b in project.blocks if not b.protected]
+    eligible = [b for b in active if not b.protected]
+    eligible_by_id = {b.id: b for b in eligible}
+    unit_blocks = [[eligible_by_id[i] for i in u.block_ids if i in eligible_by_id] for u in project.units]
+    unit_blocks = [blocks for blocks in unit_blocks if blocks]
     already = len(eligible) - len(pending)
     if already:
         log(f"继续任务：已完成 {already}/{len(eligible)} 个区域，本次剩余 {len(pending)} 个。")
+    context = TranslationContext(project, options)
     max_retries = 2
     figure_images = options.vision_review and client.provider.vision
 
@@ -178,36 +201,41 @@ def translate_project(project: Project, options: Options, client: ChatClient, sa
         preview = block.text.replace("\n", " ")[:70]
         log(f"第 {block.page + 1} 页 {block.id} 待校对，原文“{preview}”：{reason}")
 
-    def request(blocks: list[Block], attempt: int = 0):
+    def render_figure(blocks):
+        # PyMuPDF is only used by the owning worker thread, never HTTP threads.
+        figure = figure_units.get(blocks[0].unit_id)
+        if not figure or not figure_images:
+            return None
+        import base64
+        import pymupdf as fitz
+        from .extraction import crop_png
+        checkpoint(client.cancel)
+        with fitz.open(project.source) as document:
+            page = document[figure.page]
+            page.set_rotation(0)
+            image_block = Block(figure.id, figure.page, figure.rect, "")
+            png = crop_png(page, image_block, dpi=150)
+        return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+
+    def request(blocks: list[Block], attempt: int = 0, figure_image=None):
         nonlocal figure_images
         checkpoint(client.cancel)
         protected = {b.id: protect(b.template or b.text) for b in blocks}
-        page_context = "\n".join(b.text for b in project.blocks if b.page == blocks[0].page)[:12000]
-        document_context = "\n".join(b.text for b in project.blocks if b.page < 2)[:9000]
-        payload = {"document_context": document_context, "page_context": page_context, "segments": [{"id": b.id, "source": protected[b.id][0], "role": b.role,
-                    "protected_content": [i["text"] for i in b.inline]} for b in blocks]}
         figure = figure_units.get(blocks[0].unit_id)
-        if figure:
-            payload["unit"] = {"id": figure.id, "kind": "complete_figure", "title": figure.title,
-                               "labels_and_caption": [{"id": b.id, "source": b.text, "role": b.role, "angle": b.angle, "bbox": b.rect}
-                                                      for b in project.blocks if b.id in figure.block_ids]}
+        with state_lock:
+            payload = context.fields(blocks, figure, options.compact_context)
+        payload["segments"] = [{"id": b.id, "source": protected[b.id][0], "role": b.role,
+                                "protected_content": [i["text"] for i in b.inline]} for b in blocks]
         if attempt:
             payload["retry_instruction"] = "Return a nonempty translation for every requested ID. For a formula or identifier return its source verbatim and preserve=true. Never return empty strings or null."
         system = SYSTEM.format(source=options.source_language, target=options.target_language, glossary=json.dumps(options.glossary, ensure_ascii=False))
-        content = json.dumps(payload, ensure_ascii=False)
+        content = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         messages = [{"role": "system", "content": system}, {"role": "user", "content": content}]
-        with_image = bool(figure and figure_images)
+        with_image = bool(figure and figure_images and figure_image)
         if with_image:
-            import base64
-            import pymupdf as fitz
-            from .extraction import crop_png
-            with fitz.open(project.source) as document:
-                page = document[figure.page]
-                page.set_rotation(0)
-                image_block = Block(figure.id, figure.page, figure.rect, "")
-                png = crop_png(page, image_block, dpi=150)
             messages[-1]["content"] = [{"type": "text", "text": content},
-                                       {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(png).decode("ascii")}}]
+                                       {"type": "image_url", "image_url": {"url": figure_image}}]
+        client.retrying = attempt > 0
         try:
             if figure:
                 log(f"整图翻译：第 {figure.page + 1} 页 {figure.title}，结合全图处理 {len(blocks)} 个标签及图题。")
@@ -218,10 +246,12 @@ def translate_project(project: Project, options: Options, client: ChatClient, sa
                     raise
                 figure_images = False
                 warning = "接口拒绝整图输入；本次改用整图 OCR 标签及图题共同翻译，请核对图片结果。"
-                if warning not in project.warnings:
-                    project.warnings.append(warning)
+                with state_lock:
+                    if warning not in project.warnings:
+                        project.warnings.append(warning)
                 log(f"{warning} 原因：{error}")
                 messages[-1]["content"] = content
+                client.retrying = True
                 output = client.complete(messages)
             result, errors = segment_results(output, [b.id for b in blocks])
         except APIError as error:
@@ -229,35 +259,40 @@ def translate_project(project: Project, options: Options, client: ChatClient, sa
                 save()
                 raise
             result, errors = {}, {b.id: str(error) for b in blocks}
+        finally:
+            client.retrying = False
         retry = []
-        for b in blocks:
-            if b.id in errors:
-                retry.append(b)
-                continue
-            item = result[b.id]
-            keep = item.get("preserve", False)
-            try:
-                text = b.text if keep else restore(item["translation"], protected[b.id][1])
-            except APIError as error:
-                errors[b.id] = str(error)
-                retry.append(b)
-                continue
-            b.translation = b.text if keep else text
-            b.status = "preserved" if keep else "translated"
-            if keep and not is_protected(b.text):
-                b.note("模型将此区域判为保留原文，请确认是否为作者、标识或公式。")
-            if text == b.text and not keep and options.source_language != options.target_language:
-                b.note("译文与原文相同，请检查是否为专有名词。")
-            if "中文" in options.target_language and not keep and len(b.text) > 24 and not re.search(r"[\u3400-\u9fff]", text):
-                b.note("目标为中文，但译文未检测到汉字。")
-        # Persist successful IDs before retrying or observing cancellation.
-        save()
+        with state_lock:
+            for b in blocks:
+                if b.id in errors:
+                    retry.append(b)
+                    continue
+                item = result[b.id]
+                keep = item.get("preserve", False)
+                try:
+                    text = b.text if keep else restore(item["translation"], protected[b.id][1])
+                except APIError as error:
+                    errors[b.id] = str(error)
+                    retry.append(b)
+                    continue
+                b.translation = b.text if keep else text
+                b.status = "preserved" if keep else "translated"
+                b.accept_layout()
+                if keep and not is_protected(b.text):
+                    b.note("模型将此区域判为保留原文，请确认是否为作者、标识或公式。")
+                if text == b.text and not keep and options.source_language != options.target_language:
+                    b.note("译文与原文相同，请检查是否为专有名词。")
+                if "中文" in options.target_language and not keep and len(b.text) > 24 and not re.search(r"[\u3400-\u9fff]", text):
+                    b.note("目标为中文，但译文未检测到汉字。")
+            # Persist successful IDs before retrying or observing cancellation.
+            save()
         if not retry:
             return
         if attempt >= max_retries:
-            for b in retry:
-                fail(b, f"{errors[b.id]} 已重试 {max_retries} 次，保留原文供校对。")
-            save()
+            with state_lock:
+                for b in retry:
+                    fail(b, f"{errors[b.id]} 已重试 {max_retries} 次，保留原文供校对。")
+                save()
             return
         for b in retry[:3]:
             preview = b.text.replace("\n", " ")[:60]
@@ -265,20 +300,80 @@ def translate_project(project: Project, options: Options, client: ChatClient, sa
         if len(retry) > 3:
             log(f"另有 {len(retry) - 3} 个问题区域；同批其余 {len(blocks) - len(retry)} 个有效结果已保存。")
         if len(retry) == 1:
-            request(retry, attempt + 1)
+            request(retry, attempt + 1, figure_image)
         else:
             middle = len(retry) // 2
-            request(retry[:middle], attempt + 1)
-            request(retry[middle:], attempt + 1)
+            request(retry[:middle], attempt + 1, figure_image)
+            request(retry[middle:], attempt + 1, figure_image)
 
-    for batch in batches:
-        checkpoint(client.cancel)
-        request(batch)
-        finished = sum(b.status in ("translated", "edited", "preserved") for b in eligible)
-        failed = sum(b.status == "failed" for b in eligible)
-        log(f"翻译进度 {finished}/{len(eligible)} 个区域，待校对 {failed} 个。")
-        if project.units:
-            relevant = [u for u in project.units if any(b.id in u.block_ids and not b.protected for b in eligible)]
-            complete_units = sum(all(b.status in ("translated", "edited", "preserved") for b in eligible if b.id in u.block_ids) for u in relevant)
-            log(f"段落 / 整图进度 {complete_units}/{len(relevant)} 个翻译单元。")
+    def report_progress():
+        with state_lock:
+            finished = sum(has_translation(b) for b in eligible)
+            failed = sum(b.status == "failed" for b in eligible)
+            log(f"翻译进度 {finished}/{len(eligible)} 个区域，待校对 {failed} 个。")
+            if project.units:
+                complete_units = sum(all(has_translation(b) for b in blocks) for blocks in unit_blocks)
+                log(f"段落 / 整图进度 {complete_units}/{len(unit_blocks)} 个翻译单元。")
+
+    workers = min(max(1, int(options.translation_workers)), 4, len(batches))
+    if workers <= 1:
+        for batch in batches:
+            checkpoint(client.cancel)
+            request(batch, figure_image=render_figure(batch))
+            report_progress()
+    else:
+        # At most `workers` requests/images are in flight. No unbounded queue,
+        # and every figure remains one unit with its own sequential retries.
+        original_cancel = client.cancel
+        abort = threading.Event()
+        client.cancel = _RequestCancellation(original_cancel, abort)
+        pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="translation-http")
+        active, remaining = set(), iter(batches)
+        def submit_next():
+            checkpoint(client.cancel)
+            batch = next(remaining, None)
+            if batch is not None:
+                image = render_figure(batch)
+                active.add(pool.submit(request, batch, figure_image=image))
+        try:
+            for _ in range(workers):
+                submit_next()
+            while active:
+                checkpoint(client.cancel)
+                done, _ = wait(active, timeout=0.1, return_when=FIRST_COMPLETED)
+                for future in done:
+                    active.remove(future)
+                    future.result()
+                    report_progress()
+                for _ in done:
+                    submit_next()
+        except BaseException:
+            abort.set()
+            for future in active:
+                future.cancel()
+            raise
+        finally:
+            pool.shutdown(wait=True, cancel_futures=True)
+            client.cancel = original_cancel
     save()
+
+
+class _RequestCancellation:
+    """Combine user cancellation with a local abort without cancelling later PDFs."""
+    def __init__(self, original, abort):
+        self.original, self.abort = original, abort
+
+    def is_set(self):
+        return self.abort.is_set() or bool(self.original is not None and self.original.is_set())
+
+    def set(self):
+        (self.original if self.original is not None else self.abort).set()
+
+    def wait(self, timeout=None):
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while not self.is_set():
+            delay = 0.05 if deadline is None else min(0.05, max(0, deadline - time.monotonic()))
+            if delay == 0:
+                return self.is_set()
+            self.abort.wait(delay)
+        return True

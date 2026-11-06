@@ -26,6 +26,9 @@ from .engine import project_path, cached_project_path
 from .models import Block, Cancelled, LANGUAGES, MODEL_PRESETS, Options, PRESETS, Project, Provider, dataclass_from
 from .settings import data_dir, load_settings, save_settings
 from .worker import PDFWorker
+from .usage import format_usage
+from .localization import UI_LANGUAGES, Localizer, LocalizedVar, LocalizedDialogs, localize_widgets
+from .settings import save_ui_language
 
 
 BG = "#f2f5fa"
@@ -86,6 +89,13 @@ class App:
         if icon.is_file():
             self.root.iconbitmap(str(icon))
         self.settings = load_settings()
+        preferred = self.settings.get("ui_language", "zh-CN")
+        self.ui_language = preferred if preferred in UI_LANGUAGES else "zh-CN"
+        self.tr = Localizer(self.ui_language)
+        self.messages = LocalizedDialogs(messagebox, self.tr)
+        self.file_dialogs = LocalizedDialogs(filedialog, self.tr)
+        self.input_dialogs = LocalizedDialogs(simpledialog, self.tr)
+        self.root.title(self.tr("文献译境 · PaperTranslator"))
         self.profiles = self.settings.get("profiles", {})
         self.current_provider = self.settings.get("provider", "DeepSeek")
         if self.current_provider not in PRESETS:
@@ -117,6 +127,7 @@ class App:
         self._build()
         self._load_profile(self.current_provider)
         self._load_options()
+        localize_widgets(self.root, self.tr)
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.poll_after = self.root.after(100, self._poll)
 
@@ -179,20 +190,51 @@ class App:
     def _button(self, parent, text, command, primary=False, **kwargs):
         return ttk.Button(parent, text=text, command=command, style="Primary.TButton" if primary else "TButton", **kwargs)
 
+    def _text_var(self, value=""):
+        return LocalizedVar(self.root, self.tr, value)
+
+    def _change_ui_language(self, event=None):
+        selected = self.ui_language_var.get()
+        code = next((code for code, label in UI_LANGUAGES.items() if label == selected), "zh-CN")
+        if code == self.ui_language:
+            return
+        try:
+            save_ui_language(code)
+        except (OSError, ValueError) as error:
+            self.ui_language_var.set(UI_LANGUAGES[self.ui_language])
+            self.messages.showerror("设置未保存", str(error), parent=self.root)
+            return
+        self.ui_language = code
+        self.settings["ui_language"] = code
+        self.messages.showinfo("界面语言已保存", "重新启动应用后生效；当前任务与译文会保留。", parent=self.root)
+
     def _build(self):
-        header = tk.Frame(self.root, bg=INK, height=96)
+        header = tk.Frame(self.root, bg=INK, height=112)
         header.pack(fill="x")
         header.pack_propagate(False)
         tk.Label(header, text="文献译境", bg=INK, fg="white", font=("Microsoft YaHei UI", 23, "bold")).pack(side="left", padx=(26, 16))
-        tk.Label(header, text="PDF 原位翻译与校对", bg=INK, fg="#b9c8e2", justify="left", font=("Microsoft YaHei UI", 10)).pack(side="left")
+        subtitle = tk.Frame(header, bg=INK)
+        subtitle.pack(side="left", fill="y", pady=12)
+        tk.Label(subtitle, text="PDF 原位翻译与校对", bg=INK, fg="#b9c8e2", justify="left", wraplength=300,
+                 font=("Microsoft YaHei UI", 10)).pack(anchor="w")
+        language_row = tk.Frame(subtitle, bg=INK)
+        language_row.pack(anchor="w", pady=(6, 0))
+        self.ui_language_label = tk.Label(language_row, text="界面语言", bg=INK, fg="#d5e3ff", font=("Microsoft YaHei UI", 9))
+        self.ui_language_label.pack(side="left", padx=(0, 8))
+        self.ui_language_var = tk.StringVar(value=UI_LANGUAGES[self.ui_language])
+        self.ui_language_combo = ttk.Combobox(language_row, textvariable=self.ui_language_var,
+            values=list(UI_LANGUAGES.values()), state="readonly", width=16)
+        self.ui_language_combo.pack(side="left")
+        self.ui_language_combo.bind("<<ComboboxSelected>>", self._change_ui_language)
+        tk.Label(subtitle, text="重启后生效", bg=INK, fg="#b9c8e2", font=("Microsoft YaHei UI", 8)).pack(anchor="w", pady=(2, 0))
         release = tk.Frame(header, bg=INK)
         release.pack(side="right", padx=24)
         tk.Label(release, text=f"PaperTranslator  {__version__}  ·  Windows x64", bg=INK, fg="#b9c8e2").pack(anchor="e")
         self.opensource_label = tk.Label(release, text="PaperTranslator 已在 GitHub 上开源", bg=INK, fg="#d5e3ff",
-                                         cursor="hand2" if PROJECT_URL else "")
+                                         cursor="hand2" if PROJECT_URL else "", wraplength=320, justify="right")
         self.opensource_label.pack(anchor="e", pady=(6, 0))
         if PROJECT_URL:
-            self.opensource_label.bind("<Button-1>", lambda event: webbrowser.open(PROJECT_URL))
+            self.opensource_label.bind("<Button-1>", self._open_repository)
         body = ttk.Frame(self.root, padding=(22, 16))
         body.pack(fill="both", expand=True)
         self.notebook = ttk.Notebook(body)
@@ -217,10 +259,13 @@ class App:
         self.notebook.bind("<<NotebookTabChanged>>", lambda e: self._schedule_preview())
         footer = ttk.Frame(body, padding=(0, 10, 0, 0))
         footer.pack(fill="x")
-        self.status = tk.StringVar(value="就绪 · 添加 PDF 后，先分析版面，再翻译与校对。")
+        self.status = self._text_var("就绪 · 添加 PDF 后，先分析版面，再翻译与校对。")
         ttk.Label(footer, textvariable=self.status, style="Muted.TLabel").pack(side="left", fill="x", expand=True)
         self.progress = ttk.Progressbar(footer, length=200, mode="indeterminate")
         self.progress.pack(side="right")
+
+    def _open_repository(self, event=None):
+        webbrowser.open(PROJECT_URL)
 
     def _queue_ui(self):
         top = ttk.Frame(self.queue_content)
@@ -252,12 +297,12 @@ class App:
         ttk.Label(left, text="保持原页数、页面尺寸和方向；公式与数值保留。复杂区域会标出供校对。", style="Muted.TLabel", wraplength=650).pack(anchor="w", pady=9)
         panel = ttk.LabelFrame(middle, text="本次翻译", padding=14)
         panel.pack(side="right", fill="y")
-        self.source_var = tk.StringVar(value="英语")
-        self.target_var = tk.StringVar(value="简体中文")
+        self.source_var = self._text_var("英语")
+        self.target_var = self._text_var("简体中文")
         ttk.Label(panel, text="原文语言").grid(row=0, column=0, sticky="w")
-        ttk.Combobox(panel, textvariable=self.source_var, values=LANGUAGES, width=13).grid(row=1, column=0, sticky="ew", pady=(5, 12))
+        ttk.Combobox(panel, textvariable=self.source_var, values=[self.tr(v) for v in LANGUAGES], width=13).grid(row=1, column=0, sticky="ew", pady=(5, 12))
         ttk.Label(panel, text="目标语言").grid(row=0, column=1, sticky="w", padx=(12, 0))
-        ttk.Combobox(panel, textvariable=self.target_var, values=LANGUAGES[1:], width=13).grid(row=1, column=1, sticky="ew", padx=(12, 0), pady=(5, 12))
+        ttk.Combobox(panel, textvariable=self.target_var, values=[self.tr(v) for v in LANGUAGES[1:]], width=13).grid(row=1, column=1, sticky="ew", padx=(12, 0), pady=(5, 12))
         ttk.Label(panel, text="处理页码（留空为全部）").grid(row=2, column=0, columnspan=2, sticky="w")
         self.pages_var = tk.StringVar()
         ttk.Entry(panel, textvariable=self.pages_var).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(5, 10))
@@ -276,7 +321,7 @@ class App:
         ttk.Checkbutton(panel, text="翻译后自动导出 PDF", variable=self.autoexport_var).grid(row=9, column=0, columnspan=2, sticky="w", pady=4)
         ttk.Checkbutton(panel, text="PDF 显示待校对批注（黄色图标）", variable=self.review_marks_var).grid(row=10, column=0, columnspan=2, sticky="w", pady=4)
         ttk.Checkbutton(panel, text="同时导出 JSON（校对项目和报告）", variable=self.export_json_var).grid(row=11, column=0, columnspan=2, sticky="w", pady=4)
-        self.provider_badge = tk.StringVar()
+        self.provider_badge = self._text_var()
         ttk.Label(panel, textvariable=self.provider_badge, foreground=BLUE, wraplength=310).grid(row=12, column=0, columnspan=2, sticky="w", pady=14)
         self._button(panel, "配置接口与术语 →", lambda: self.notebook.select(self.settings_tab)).grid(row=13, column=0, columnspan=2, sticky="ew")
         output = ttk.Frame(self.queue_actions)
@@ -296,13 +341,17 @@ class App:
         self.force_export_button = self._button(controls, "强制停止排版", self._force_export_stop, state="disabled")
         self.force_export_button.pack(side="left", padx=8)
         self._button(controls, "打开输出目录", self._open_output).pack(side="right")
+        self.usage_var = tk.StringVar(value=format_usage({}, self.tr))
+        self.usage_label = ttk.Label(self.queue_actions, textvariable=self.usage_var, wraplength=900, style="Muted.TLabel")
+        self.usage_label.pack(fill="x", pady=(0, 5))
+        self.usage_label.bind("<Configure>", lambda event: self.usage_label.configure(wraplength=max(120, event.width - 8)))
         self.log_text = tk.Text(self.queue_content, height=5, bg="#e9eef6", fg=INK, relief="flat", padx=10, pady=8, wrap="word", state="disabled", font=("Microsoft YaHei UI", 9))
         self.log_text.pack(fill="x")
 
     def _review_ui(self):
         bar = ttk.Frame(self.review_tab)
         bar.pack(fill="x", pady=(0, 8))
-        self.review_title = tk.StringVar(value="先分析 PDF 或打开已保存项目")
+        self.review_title = self._text_var("先分析 PDF 或打开已保存项目")
         ttk.Label(bar, textvariable=self.review_title, font=("Microsoft YaHei UI", 12, "bold")).pack(side="left")
         self._button(bar, "导出校对后的 PDF", self._export_current, True).pack(side="right")
         export_controls = ttk.Frame(self.review_tab)
@@ -319,8 +368,8 @@ class App:
         filterbar = ttk.Frame(editor)
         filterbar.pack(fill="x", pady=(0, 7))
         ttk.Label(filterbar, text="段落与整图（展开图片校对标签）").pack(side="left")
-        self.filter_var = tk.StringVar(value="全部")
-        filt = ttk.Combobox(filterbar, values=["全部", "待校对", "可翻译", "已翻译"], textvariable=self.filter_var, width=10, state="readonly")
+        self.filter_var = self._text_var("全部")
+        filt = ttk.Combobox(filterbar, values=[self.tr(v) for v in ["全部", "待校对", "可翻译", "已翻译"]], textvariable=self.filter_var, width=10, state="readonly")
         filt.pack(side="right")
         filt.bind("<<ComboboxSelected>>", lambda e: self._fill_blocks())
         self.block_tree = ttk.Treeview(editor, columns=("page", "text", "state"), show="tree headings", height=7)
@@ -349,7 +398,7 @@ class App:
         self.vertical_var = tk.BooleanVar()
         ttk.Checkbutton(geom, text="字符竖排", variable=self.vertical_var).pack(side="left")
         self._button(editor, "保存区域修改", self._save_block, True).pack(fill="x", pady=5)
-        self.note_var = tk.StringVar(value="点选区域可查看原文、译文和校对提示。")
+        self.note_var = self._text_var("点选区域可查看原文、译文和校对提示。")
         ttk.Label(editor, textvariable=self.note_var, style="Muted.TLabel", wraplength=350).pack(fill="x", pady=4)
         navigation = ttk.Frame(viewer)
         navigation.pack(fill="x", padx=(12, 0), pady=(0, 6))
@@ -385,13 +434,15 @@ class App:
         self.canvases[0].bind("<ButtonRelease-1>", self._manual_finish)
 
     def _settings_ui(self):
+        self.settings_content.columnconfigure(0, weight=1, uniform="settings_columns")
+        self.settings_content.columnconfigure(1, weight=1, uniform="settings_columns")
         left = ttk.LabelFrame(self.settings_content, text="API 接口 · 每位使用者填写自己的密钥", padding=16)
-        left.pack(side="left", fill="both", expand=True, padx=(0, 18))
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 18))
         right = ttk.LabelFrame(self.settings_content, text="排版与术语", padding=16)
-        right.pack(side="right", fill="both", expand=True)
-        self.provider_var = tk.StringVar(value=self.current_provider)
+        right.grid(row=0, column=1, sticky="nsew")
+        self.provider_var = self._text_var(self.current_provider)
         ttk.Label(left, text="服务商预设").grid(row=0, column=0, sticky="w", pady=7)
-        providerbox = ttk.Combobox(left, textvariable=self.provider_var, values=list(PRESETS), state="readonly")
+        providerbox = ttk.Combobox(left, textvariable=self.provider_var, values=[self.tr(v) for v in PRESETS], state="readonly")
         providerbox.grid(row=0, column=1, sticky="ew", pady=7)
         providerbox.bind("<<ComboboxSelected>>", self._switch_profile)
         self.base_var, self.model_var, self.key_var = tk.StringVar(), tk.StringVar(), tk.StringVar()
@@ -420,6 +471,14 @@ class App:
             ttk.Entry(left, textvariable=var, width=18).grid(row=row, column=1, sticky="w", pady=6)
         ttk.Label(left, text="单价由你按服务商账单填写；0 表示未设置。\n估算不含视觉输入、重试及推理 Token。", style="Muted.TLabel").grid(row=12, column=0, columnspan=2, sticky="w", pady=10)
         left.columnconfigure(1, weight=1)
+        self.compact_context_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(right, text="精简重复上下文（节省 Token）", variable=self.compact_context_var).pack(anchor="w", pady=(0, 5))
+        ttk.Label(right, text="保留完整待译段落和整图；取消勾选可恢复完整上下文。\n仅影响后续请求，已完成译文仍会复用。", style="Muted.TLabel", wraplength=470).pack(anchor="w", pady=(0, 10))
+        ttk.Label(right, text="同时翻译请求数（1–4）").pack(anchor="w")
+        self.translation_workers_var = tk.StringVar(value="2")
+        ttk.Combobox(right, textvariable=self.translation_workers_var, values=["1", "2", "3", "4"], state="readonly", width=8).pack(anchor="w", pady=(4, 5))
+        ttk.Label(right, text="默认 2；遇到限流可调为 1。模型和待译内容保持不变。", style="Muted.TLabel", wraplength=470).pack(anchor="w", pady=(0, 10))
+        ttk.Label(right, text="用量为接口已报告值；思考已计入输出，? 表示未报告。\n中断请求及未报告用量以服务商账单为准。", style="Muted.TLabel", wraplength=470).pack(anchor="w", pady=(0, 10))
         self.dpi_var = tk.StringVar(value="220")
         self.minfont_var = tk.StringVar(value="6")
         self.font_var = tk.StringVar()
@@ -438,6 +497,20 @@ class App:
         self._button(right, "导入 CSV / TSV 术语表", self._import_glossary).pack(anchor="w", pady=8)
         ttk.Label(right, text="默认翻译正文、图表文字、图题、脚注及参考文献标题。\n公式、变量、数值、代码和引用标识保留；译文溢出时保留原文并标注。", style="Muted.TLabel", wraplength=470).pack(anchor="w", pady=8)
         self._button(right, "关于 / 开源许可 / 使用说明", self._about).pack(anchor="w")
+        # Long localized hints must wrap within their column on small screens.
+        for label in right.winfo_children():
+            if isinstance(label, ttk.Label):
+                label.pack_configure(fill="x")
+                label.bind("<Configure>", lambda event: event.widget.configure(wraplength=max(80, event.width - 4)))
+        for label in left.winfo_children():
+            if isinstance(label, ttk.Label) and int(label.grid_info().get("columnspan", 1)) == 2:
+                label.grid_configure(sticky="ew")
+                label.bind("<Configure>", lambda event: event.widget.configure(wraplength=max(80, event.width - 4)))
+            elif isinstance(label, ttk.Checkbutton):
+                label.configure(style="Settings.TCheckbutton")
+                label.grid_configure(sticky="ew")
+        left.bind("<Configure>", lambda event: ttk.Style(self.root).configure(
+            "Settings.TCheckbutton", wraplength=max(100, event.width - 70)))
 
     def _capture_profile(self):
         price_in, price_out = float(self.input_price_var.get() or "0"), float(self.output_price_var.get() or "0")
@@ -483,7 +556,8 @@ class App:
                          page_range=self.pages_var.get().strip(), ocr=self.ocr_var.get(), ocr_dpi=int(self.dpi_var.get()),
                          ocr_rotations=self.rotations_var.get(), vision_review=self.vision_var.get(), minimum_font=float(self.minfont_var.get()),
                          font_path=self.font_var.get().strip(), glossary=glossary, translate_figures=self.figures_var.get(),
-                         pdf_review_marks=self.review_marks_var.get(), export_json=self.export_json_var.get())
+                         pdf_review_marks=self.review_marks_var.get(), export_json=self.export_json_var.get(),
+                         compact_context=self.compact_context_var.get(), translation_workers=int(self.translation_workers_var.get()))
         result.validate()
         return result
 
@@ -496,6 +570,8 @@ class App:
                            (self.ocr_var, o.ocr), (self.figures_var, o.translate_figures), (self.rotations_var, o.ocr_rotations), (self.vision_var, o.vision_review),
                            (self.dpi_var, o.ocr_dpi), (self.minfont_var, o.minimum_font), (self.font_var, o.font_path)]:
             var.set(value)
+        self.compact_context_var.set(o.compact_context)
+        self.translation_workers_var.set(str(o.translation_workers))
         self.glossary_text.delete("1.0", "end")
         self.glossary_text.insert("1.0", "\n".join(f"{k}={v}" for k, v in o.glossary.items()))
 
@@ -507,20 +583,20 @@ class App:
             options = self._options()
             self.profiles[self.provider_var.get()] = vars(provider).copy()
             settings = {"profiles": self.profiles, "provider": self.provider_var.get(), "options": vars(options),
-                        "remember": self.remember_var.get(), "output_dir": self.output_var.get()}
+                        "remember": self.remember_var.get(), "output_dir": self.output_var.get(), "ui_language": self.ui_language}
             save_settings(settings, self.remember_var.get())
             self.provider_badge.set(f"{provider.name}  /  {provider.model}\n文字翻译 + {'视觉核对' if provider.vision else '本地 OCR'}")
             if show:
-                self._log("设置已保存。" + ("密钥已按当前 Windows 用户加密。" if self.remember_var.get() else "密钥仅在本次会话中使用。"))
+                self._log(self.tr("设置已保存。") + self.tr("密钥已按当前 Windows 用户加密。" if self.remember_var.get() else "密钥仅在本次会话中使用。"))
             return True
         except (ValueError, OSError, RuntimeError) as e:
-            messagebox.showerror("设置未保存", str(e), parent=self.root)
+            self.messages.showerror("设置未保存", str(e), parent=self.root)
             return False
 
     def _add_files(self):
         if self.busy:
             return
-        paths = filedialog.askopenfilenames(title="添加 PDF 文献", filetypes=[("PDF 文档", "*.pdf")])
+        paths = self.file_dialogs.askopenfilenames(title="添加 PDF 文献", filetypes=[("PDF 文档", "*.pdf")])
         self._accept_paths(paths)
 
     def _drop(self, event):
@@ -533,7 +609,7 @@ class App:
             if Path(path).suffix.lower() != ".pdf" or not Path(path).is_file() or path in self.files:
                 continue
             self.files.append(path)
-            self.file_tree.insert("", "end", iid=str(len(self.files) - 1), values=(Path(path).name, "等待分析"))
+            self.file_tree.insert("", "end", iid=str(len(self.files) - 1), values=(Path(path).name, self.tr("等待分析")))
         if self.files and not self.output_var.get():
             self.output_var.set(str(Path(self.files[0]).parent / "译文"))
 
@@ -546,15 +622,15 @@ class App:
         self.files = [p for i, p in enumerate(self.files) if i not in selected]
         self.file_tree.delete(*self.file_tree.get_children())
         for i, path in enumerate(self.files):
-            self.file_tree.insert("", "end", iid=str(i), values=(Path(path).name, "已分析" if path in self.projects else "等待分析"))
+            self.file_tree.insert("", "end", iid=str(i), values=(Path(path).name, self.tr("已分析" if path in self.projects else "等待分析")))
 
     def _choose_output(self):
-        path = filedialog.askdirectory(title="选择输出目录")
+        path = self.file_dialogs.askdirectory(title="选择输出目录")
         if path:
             self.output_var.set(path)
 
     def _choose_font(self):
-        path = filedialog.askopenfilename(title="选择字体", filetypes=[("字体", "*.ttf *.otf *.ttc")])
+        path = self.file_dialogs.askopenfilename(title="选择字体", filetypes=[("字体", "*.ttf *.otf *.ttc")])
         if path:
             self.font_var.set(path)
 
@@ -612,7 +688,7 @@ class App:
             job.close()
             self.pdf_job = None
             self._set_busy(False)
-            messagebox.showerror("后台任务未启动", str(error), parent=self.root)
+            self.messages.showerror("后台任务未启动", str(error), parent=self.root)
             return
         self.worker = threading.Thread(target=job.relay, args=(self.events,),
                                        name="pdf-event-reader", daemon=True)
@@ -622,7 +698,7 @@ class App:
         if self.busy:
             return
         if not self.files:
-            messagebox.showinfo("添加文献", "请先添加 PDF 文献。", parent=self.root)
+            self.messages.showinfo("添加文献", "请先添加 PDF 文献。", parent=self.root)
             return
         try:
             options, provider = self._options(), self._capture_profile()
@@ -639,7 +715,7 @@ class App:
             if not self._save_all(show=False, validate=mode == "translate"):
                 return
         except (ValueError, OSError) as error:
-            messagebox.showerror("无法开始", str(error), parent=self.root)
+            self.messages.showerror("无法开始", str(error), parent=self.root)
             return
         selected = self.file_tree.selection()
         files = [self.files[int(i)] for i in selected] if selected else list(self.files)
@@ -647,13 +723,14 @@ class App:
         for source in files:
             self._file_state(source, "准备处理")
 
-        self._launch_process({"kind": "queue", "mode": mode, "files": files, "output": str(output),
+        paths = {source: str(self.projects[source][1]) for source in files if source in self.projects}
+        self._launch_process({"kind": "queue", "mode": mode, "files": files, "output": str(output), "project_paths": paths,
                               "options": vars(options), "provider": vars(provider), "autoexport": autoexport})
 
     def _file_state(self, source, state):
         if source in self.files:
             iid = str(self.files.index(source))
-            self.file_tree.item(iid, values=(Path(source).name, state))
+            self.file_tree.item(iid, values=(Path(source).name, self.tr(state)))
 
     def _test_api(self):
         if self.busy:
@@ -662,7 +739,7 @@ class App:
             provider = self._capture_profile()
             validate_connection(provider)
         except ValueError as error:
-            messagebox.showerror("接口设置", str(error), parent=self.root)
+            self.messages.showerror("接口设置", str(error), parent=self.root)
             return
 
         def task():
@@ -685,7 +762,7 @@ class App:
         job = self.pdf_job
         if not self.busy or job is None or not job.exporting:
             return
-        if not messagebox.askyesno("停止当前排版", "将放弃本次尚未完成的 PDF 排版。\n已保存的译文、原 PDF 和之前成功导出的 PDF 会保留。\n\n是否停止？", parent=self.root):
+        if not self.messages.askyesno("停止当前排版", "将放弃本次尚未完成的 PDF 排版。\n已保存的译文、原 PDF 和之前成功导出的 PDF 会保留。\n\n是否停止？", parent=self.root):
             return
         if job.force_stop_export():
             self.export_progress = None
@@ -727,17 +804,17 @@ class App:
             return
         self.export_status_second = elapsed
         data = self.export_progress
-        label = data["label"]
+        label = self.tr(data["label"])
         if data.get("page"):
-            label = f"第 {data['page']} 页 · " + label
+            label = self.tr("第 {page} 页 · {label}").format(page=data["page"], label=label)
         if data.get("total", 0) > 0:
             label += f" {data.get('current', 0)}/{data['total']}"
-        text = f"排版 · {label} · 此步 {elapsed} 秒"
+        text = self.tr("排版 · {label} · 此步 {seconds} 秒").format(label=label, seconds=elapsed)
         if elapsed >= 60 and data.get("phase") != "complete":
             if not self.export_warned:
                 self.export_warned = True
                 self._log(f"{label} 已持续 {elapsed} 秒没有新进展；不等同于确定卡死，可继续等待或停止排版。")
-            text += " · 暂无新进展，可等待或停止排版"
+            text += self.tr(" · 暂无新进展，可等待或停止排版")
         self.status.set(text)
 
     def _poll(self):
@@ -754,13 +831,15 @@ class App:
                 elif kind == "error":
                     self._log("错误：" + value)
                     if not self.closing:
-                        messagebox.showerror("操作未完成", value, parent=self.root)
+                        self.messages.showerror("操作未完成", value, parent=self.root)
                 elif kind == "info":
                     self._log(value)
                     if not self.closing:
-                        messagebox.showinfo("连接测试", value, parent=self.root)
+                        self.messages.showinfo("连接测试", value, parent=self.root)
                 elif kind == "file_state":
                     self._file_state(*value)
+                elif kind == "usage":
+                    self.usage_var.set(format_usage(value, self.tr))
                 elif kind == "progress":
                     self._export_update(value)
                 elif kind == "project_path":
@@ -797,6 +876,7 @@ class App:
                 text = text.replace(secret, "[已隐藏密钥]")
         if self.key_var.get():
             text = text.replace(self.key_var.get(), "[已隐藏密钥]")
+        text = self.tr(text)
         if len(text) > LOG_ENTRY_CHARACTERS:
             text = text[:LOG_ENTRY_CHARACTERS] + "\n（过长日志已省略；任务内容保存在校对项目中。）"
         self.log_text.configure(state="normal")
@@ -816,7 +896,7 @@ class App:
     def _open_project(self):
         if self.busy:
             return
-        path = filedialog.askopenfilename(title="打开校对项目", filetypes=[("翻译项目", "*.ptrans.json")])
+        path = self.file_dialogs.askopenfilename(title="打开校对项目", filetypes=[("翻译项目", "*.ptrans.json")])
         if not path:
             return
         try:
@@ -827,7 +907,7 @@ class App:
             self._load_options(project.options)
             self.notebook.select(self.review_tab)
         except (ValueError, OSError, TypeError) as error:
-            messagebox.showerror("打开失败", str(error), parent=self.root)
+            self.messages.showerror("打开失败", str(error), parent=self.root)
 
     def _load_selected(self):
         if self.busy:
@@ -836,6 +916,13 @@ class App:
         if not selected:
             return
         source = self.files[int(selected[0])]
+        if source in self.projects:
+            try:
+                path = self.projects[source][1]
+                self.projects[source] = (Project.load(path), path)
+            except (ValueError, OSError, TypeError) as error:
+                self.messages.showerror('载入失败', str(error), parent=self.root)
+                return
         if source not in self.projects:
             cache = cached_project_path(source, self.output_var.get())
             path = cache if cache.exists() else project_path(source, self.output_var.get())
@@ -843,10 +930,10 @@ class App:
                 try:
                     self.projects[source] = (Project.load(path), path)
                 except (ValueError, OSError) as error:
-                    messagebox.showerror("载入失败", str(error), parent=self.root)
+                    self.messages.showerror("载入失败", str(error), parent=self.root)
                     return
             else:
-                messagebox.showinfo("尚未分析", "请先分析版面。", parent=self.root)
+                self.messages.showinfo("尚未分析", "请先分析版面。", parent=self.root)
                 return
         self._show_project(*self.projects[source])
         self._load_options(self.project.options)
@@ -854,8 +941,11 @@ class App:
 
     def _show_project(self, project, path):
         self.project, self.project_file = project, Path(path)
+        self.usage_var.set(format_usage(project.usage, self.tr))
         self.review_title.set(Path(project.source).name)
         self.page = min(self.page, max(0, len(project.pages) - 1))
+        if project.selected_pages and self.page not in project.selected_pages:
+            self.page = project.selected_pages[0]
         self._fill_blocks()
         self._schedule_preview()
 
@@ -863,9 +953,11 @@ class App:
         self.block_tree.delete(*self.block_tree.get_children())
         if not self.project:
             return
-        names = {"pending": "待翻译", "translated": "已翻译", "edited": "已修改", "preserved": "保留原文", "failed": "失败", "overflow": "排版溢出"}
+        names = {"pending": "待翻译", "translated": "已翻译", "edited": "已修改", "preserved": "保留原文", "failed": "失败", "overflow": "排版溢出", "layout_pending": "待校对"}
         figures = {u.id: u for u in self.project.units if u.kind == "figure"}
         for b in self.project.blocks:
+            if self.project.pages and b.page not in self.project.selected_pages:
+                continue
             review = bool(b.notes and not b.approved) or b.status in ("failed", "overflow")
             mode = self.filter_var.get()
             if mode == "待校对" and not review or mode == "可翻译" and b.protected or mode == "已翻译" and b.status not in ("translated", "edited"):
@@ -878,12 +970,13 @@ class App:
                 if not self.block_tree.exists(parent):
                     members = [x for x in self.project.blocks if x.id in unit.block_ids]
                     done = sum(x.status in ("translated", "edited", "preserved") for x in members)
-                    self.block_tree.insert("", "end", iid=parent, values=(unit.page + 1, f"整图 · {unit.title}", f"{done}/{len(members)}"))
-            label = ("图题 · " if b.role == "figure_caption" else "标签 · " if parent else "段落 · " if b.role == "paragraph" else "") + b.text[:75]
-            self.block_tree.insert(parent, "end", iid=b.id, values=(b.page + 1, label, state))
+                    self.block_tree.insert("", "end", iid=parent, values=(unit.page + 1, self.tr("整图") + " · " + unit.title, f"{done}/{len(members)}"))
+            prefix = self.tr("图题" if b.role == "figure_caption" else "标签" if parent else "段落" if b.role == "paragraph" else "")
+            label = (prefix + " · " if prefix else "") + b.text[:75]
+            self.block_tree.insert(parent, "end", iid=b.id, values=(b.page + 1, label, self.tr(state)))
         for unit in figures.values():
             if not unit.block_ids and not self.block_tree.exists(unit.id) and self.filter_var.get() == "全部":
-                self.block_tree.insert("", "end", iid=unit.id, values=(unit.page + 1, f"整图 · {unit.title}", "未识别标签"))
+                self.block_tree.insert("", "end", iid=unit.id, values=(unit.page + 1, self.tr("整图") + " · " + unit.title, self.tr("未识别标签")))
 
     def _selected_block(self):
         selected = self.block_tree.selection()
@@ -905,7 +998,7 @@ class App:
             unit = self._selected_unit()
             if unit:
                 members = [b for identity in unit.block_ids for b in self.project.blocks if b.id == identity]
-                for widget, values in ((self.source_text, [b.text for b in members]), (self.translation_text, [b.translation or "（待翻译）" for b in members])):
+                for widget, values in ((self.source_text, [b.text for b in members]), (self.translation_text, [b.translation or self.tr("（待翻译）") for b in members])):
                     widget.configure(state="normal")
                     widget.delete("1.0", "end")
                     widget.insert("1.0", "\n\n".join(values))
@@ -939,28 +1032,33 @@ class App:
             if not math.isfinite(angle):
                 raise ValueError
         except ValueError:
-            messagebox.showerror("方向错误", "方向应为有限的角度数值。", parent=self.root)
+            self.messages.showerror("方向错误", "方向应为有限的角度数值。", parent=self.root)
             return
         source = self.source_text.get("1.0", "end-1c").strip()
         translated = self.translation_text.get("1.0", "end-1c").strip()
         if not source:
-            messagebox.showerror("原文为空", "请填写原文。", parent=self.root)
+            self.messages.showerror("原文为空", "请填写原文。", parent=self.root)
             return
         corrected_source = source != block.text
         if corrected_source and block.inline:
-            messagebox.showerror("段内含公式", "此段含原始公式。请保持原文字段不变，在译文字段中修改文字并保留公式标记。", parent=self.root)
+            self.messages.showerror("段内含公式", "此段含原始公式。请保持原文字段不变，在译文字段中修改文字并保留公式标记。", parent=self.root)
             return
         old_translation = block.translation
         block.text, block.translation = source, translated
         block.angle, block.vertical = angle % 360, self.vertical_var.get()
         block.protected, block.approved = self.keep_var.get(), self.approved_var.get()
         block.status = "preserved" if block.protected else "edited"
+        block.accept_layout()
         if not block.protected and (not translated or (corrected_source and translated == old_translation)):
             block.translation = ""
             block.status = "pending"
         if block.protected:
             block.translation = block.text
-        self.project.save(self.project_file)
+        try:
+            self.project.save(self.project_file)
+        except (ValueError, OSError) as error:
+            self.messages.showerror('保存失败', str(error), parent=self.root)
+            return
         self._fill_blocks()
         self.block_tree.selection_set(block.id)
         self._log("区域修改已保存；重新导出后，右侧 PDF 预览会更新。")
@@ -971,11 +1069,11 @@ class App:
         try:
             options = self._options()
         except ValueError as error:
-            messagebox.showerror("设置错误", str(error), parent=self.root)
+            self.messages.showerror("设置错误", str(error), parent=self.root)
             return
         directory = Path(self.project.output).parent if self.project.output else (
             Path(self.output_var.get()) if self.output_var.get().strip() else Path(self.project.source).parent / "译文")
-        filename = filedialog.asksaveasfilename(title="导出翻译 PDF", initialfile=Path(self.project.source).stem + ".译文.pdf", defaultextension=".pdf", filetypes=[("PDF", "*.pdf")], initialdir=str(directory))
+        filename = self.file_dialogs.asksaveasfilename(title="导出翻译 PDF", initialfile=Path(self.project.source).stem + ".译文.pdf", defaultextension=".pdf", filetypes=[("PDF", "*.pdf")], initialdir=str(directory))
         if not filename:
             return
         if not self._save_all(show=False, validate=False):
@@ -1043,7 +1141,7 @@ class App:
             except (OSError, RuntimeError, ValueError, MemoryError, tk.TclError) as error:
                 canvas.delete("all")
                 self.tk_images[i] = self.preview_keys[i] = None
-                canvas.create_text(20, 30, text="预览不可用：" + str(error), anchor="nw", width=280)
+                canvas.create_text(20, 30, text=self.tr("预览不可用：") + str(error), anchor="nw", width=280)
 
     def _draw_selection(self, canvas, index, selected):
         canvas.delete("selection")
@@ -1097,7 +1195,7 @@ class App:
             rect &= page.rect
         if rect.width < 2 or rect.height < 2:
             return
-        text = simpledialog.askstring("补充文字区域", "输入框选区域的原文（稍后可在编辑器中填写译文）：", parent=self.root)
+        text = self.input_dialogs.askstring("补充文字区域", "输入框选区域的原文（稍后可在编辑器中填写译文）：", parent=self.root)
         if not text or not text.strip():
             return
         number = 1
@@ -1108,7 +1206,12 @@ class App:
                   quad=[[rect.x0, rect.y0], [rect.x1, rect.y0], [rect.x1, rect.y1], [rect.x0, rect.y1]],
                   fontsize=min(12, rect.height * 0.75), local_width=rect.width, local_height=rect.height)
         self.project.blocks.append(b)
-        self.project.save(self.project_file)
+        try:
+            self.project.save(self.project_file)
+        except (ValueError, OSError) as error:
+            self.project.blocks.remove(b)
+            self.messages.showerror('保存失败', str(error), parent=self.root)
+            return
         self._fill_blocks()
         self.block_tree.selection_set(b.id)
         self.block_tree.see(b.id)
@@ -1116,7 +1219,7 @@ class App:
         canvas.configure(cursor="")
 
     def _import_glossary(self):
-        path = filedialog.askopenfilename(title="导入术语表（前两列为原词、译词）", filetypes=[("术语表", "*.csv *.tsv")])
+        path = self.file_dialogs.askopenfilename(title="导入术语表（前两列为原词、译词）", filetypes=[("术语表", "*.csv *.tsv")])
         if not path:
             return
         try:
@@ -1133,14 +1236,19 @@ class App:
             self.glossary_text.insert("end", ("\n" if self.glossary_text.get("1.0", "end").strip() else "") + "\n".join(result))
             self._log(f"已导入 {len(result)} 条术语。")
         except (OSError, UnicodeError, csv.Error) as error:
-            messagebox.showerror("导入失败", str(error), parent=self.root)
+            self.messages.showerror("导入失败", str(error), parent=self.root)
 
     def _about(self):
-        messagebox.showinfo("文献译境", f"PaperTranslator {__version__}\nPython · Tk · PyMuPDF · RapidOCR\n\n本项目按 AGPL-3.0-only 提供；源码、第三方许可与构建说明见：\n{PROJECT_URL}\n各使用者自行配置 API；软件没有内置共享密钥。\n\n保留原页数、位置及方向。疑难 OCR、竖排和复杂背景需校对。\n首次使用请先处理 1–2 页，再检查图表和公式。\n详细规则、限制与构建方法见 README.md。", parent=self.root)
+        body = f"PaperTranslator {__version__}\nPython · Tk · PyMuPDF · RapidOCR\n\n" + "\n".join(self.tr(v) for v in (
+            "本项目按 AGPL-3.0-only 提供；源码、第三方许可与构建说明见：", PROJECT_URL,
+            "各使用者自行配置 API；软件没有内置共享密钥。", "",
+            "保留原页数、位置及方向。疑难 OCR、竖排和复杂背景需校对。",
+            "首次使用请先处理 1–2 页，再检查图表和公式。", "详细规则、限制与构建方法见 README.md。"))
+        self.messages.showinfo("文献译境", body, parent=self.root)
 
     def _close(self):
         if self.busy:
-            if not messagebox.askyesno("取消并退出", "任务正在运行。是否取消任务、保存进度后退出？", parent=self.root):
+            if not self.messages.askyesno("取消并退出", "任务正在运行。是否取消任务、保存进度后退出？", parent=self.root):
                 return
             self.closing = True
             self._cancel()

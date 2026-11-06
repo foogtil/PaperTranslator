@@ -38,14 +38,20 @@ LIGATURES = str.maketrans({"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", 
 
 
 def _hard_protected(span, text: str, line_size: float) -> bool:
+    if span.get("math_literal"):
+        return True
     font = span.get("font", "").lower()
     flags = span.get("flags", 0)
     if flags & 8 or any(name in font for name in ("cmmi", "cmsy", "cmex", "math", "symbol", "msam", "msbm")):
         return True
     value = text.strip()
+    if flags & 1 or re.fullmatch(r"[ˆ̂ˇ˘˙¨¯⃗]+", value):
+        return True  # Accents and superscripts belong to their mathematical base.
     if span["size"] < line_size * 0.80 and re.fullmatch(r"[\d,;\[\]()\s]+", value):
         return True  # Preserve superscript citation / affiliation placement.
-    if flags & 2 and re.fullmatch(r"[A-Za-z](?:[_^][\w{}]+)?", value):
+    if flags & 2 and re.fullmatch(r"[A-Za-z]{1,3}(?:[_^][\w{}]+)?", value) and value.lower() not in ("the", "and", "for", "of", "in", "to", "as", "is", "an", "at", "on", "by", "be", "or", "if", "so", "we"):
+        return True
+    if font.startswith(("cmr", "cmss")) and re.fullmatch(r"[\d\s.,:;=+−\-*/()\[\]{}|<>]+", value):
         return True
     if font.endswith(".i") and re.fullmatch(r"[A-Za-z]{1,3}", value) and value.lower() not in ("the", "and", "for", "of", "in", "to", "as", "is", "an", "at", "on", "by", "be", "or", "if", "so", "we"):
         return True
@@ -81,9 +87,15 @@ def _run_text(group):
     return re.sub(r"(?<=\w)-\n(?=[a-z])", "", result).replace("\n", " ").strip()
 
 
-def native_blocks(page, page_index: int, figures=None) -> list[Block]:
+def native_blocks(page, page_index: int, figures=None, excluded=()) -> list[Block]:
     figures = figure_rects(page) if figures is None else figures
     data = page.get_text("rawdict", flags=fitz.TEXTFLAGS_RAWDICT & ~fitz.TEXT_PRESERVE_IMAGES)
+    from .native_geometry import prepare_spans
+    prepare_spans(data, excluded)
+    from .tables import separate_tables
+    separate_tables(data)
+    from .structure import attach_math_satellites, display_math_groups
+    attach_math_satellites(data, _hard_protected)
     invisible = [fitz.Rect(t["bbox"]) for t in page.get_texttrace() if t.get("type") == 3 or t.get("opacity", 1) < 0.05]
     output = []
     for raw in data["blocks"]:
@@ -126,6 +138,9 @@ def native_blocks(page, page_index: int, figures=None) -> list[Block]:
         paragraphs = paragraph_runs(raw, _hard_protected, _run_text, figures)
         if paragraphs is not None:
             groups = paragraphs
+        display_groups = display_math_groups(all_runs)
+        if display_groups is not None:
+            groups = display_groups
         for group in groups:
             line = group[0][0]
             span = max(group, key=lambda r: len(r[2]))[1]
@@ -149,8 +164,17 @@ def native_blocks(page, page_index: int, figures=None) -> list[Block]:
                           fontsize=span["size"], color=span.get("color", 0), bold=bool(span.get("flags", 0) & 16 or span.get("font", "").lower().endswith(".b")),
                           angle=round(angle, 3), vertical=bool(line.get("wmode", 0)), quad=quad,
                           erasers=_center_erasers([r[1] for r in group]), protected=keep,
+                          glyphs=[list(c["bbox"]) for r in group for c in r[1].get("chars", []) if not c["c"].isspace()],
                           local_width=right - left, local_height=bottom - top)
             block.role = "protected" if keep else "paragraph"
+            if display_groups is not None and not keep:
+                block.role = "formula_label"
+            if raw.get('table_cell'):
+                block.role = 'table_cell'
+                frame = fitz.Rect(raw['cell_rect'])
+                block.rect = list(frame)
+                block.quad = [list(frame.tl), list(frame.tr), list(frame.br), list(frame.bl)]
+                block.local_width, block.local_height = frame.width, frame.height
             if not keep and any(r[3] for r in group) and abs(angle) < 0.01:
                 block.template, block.inline = paragraph_template(group, _run_text)
             if keep:
@@ -195,6 +219,8 @@ class OCR:
         # Call only after normalizing page rotation to zero.
         pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False, clip=clip)
         image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        if not options.translate_figures:
+            mask_figures(image, figure_rects(page), zoom, pix.x, pix.y)
         width, height = image.size
         rotations = (0, 90, 180, 270) if options.ocr_rotations else (0,)
         candidates = []
@@ -256,6 +282,15 @@ def crop_png(page, block: Block, dpi: int = 220):
     return pix.tobytes("png")
 
 
+def mask_figures(image, figures, zoom, x=0, y=0):
+    """Omit figure pixels from page OCR/vision while preserving scan backgrounds."""
+    for rect in figures:
+        box = fitz.Rect(rect) * zoom - (x, y, x, y)
+        box &= fitz.Rect(0, 0, image.width, image.height)
+        if not box.is_empty:
+            image.paste((255, 255, 255), tuple(box.irect))
+
+
 def analyze(source: str, options: Options, save_path: str, cancel: threading.Event, log, ocr: OCR | None = None, password: str = "") -> Project:
     options.validate()
     source = str(Path(source).resolve())
@@ -263,20 +298,36 @@ def analyze(source: str, options: Options, save_path: str, cancel: threading.Eve
     source_hash = digest_file(source)
     project = None
     if project_path.exists():
-        candidate = Project.load(project_path)
+        candidate = Project.load(project_path, verify=False)
+        from .locking import identity
+        if identity(candidate.source) != identity(source):
+            raise ValueError('已保存项目与当前原 PDF 不对应，请重新选择项目。')
         old = candidate.options
-        extraction_keys = ("ocr", "ocr_dpi", "ocr_rotations", "page_range", "translate_figures")
-        if candidate.source_hash == source_hash and all(old.get(k, True if k == "translate_figures" else None) == vars(options).get(k) for k in extraction_keys):
+        extraction_keys = ("ocr", "ocr_dpi", "ocr_rotations", "translate_figures")
+        if candidate.source_hash == source_hash:
             project = candidate
+            if any(old.get(k, True if k == "translate_figures" else None) != vars(options).get(k) for k in extraction_keys):
+                for info in project.pages:
+                    info.analyzed = info.vision_analyzed = False
             if project.extraction_version < 3:
                 log("此项目沿用旧版分块并保留已有进度。若正文已被逐词切分，建议选择新的输出目录，用新版重新分析；原任务进度继续保留。")
     with fitz.open(source) as document:
         if document.needs_pass and not document.authenticate(password):
             raise ValueError("PDF 已加密。请先使用拥有权限的密码解锁后再导入。")
         selected = parse_pages(options.page_range, len(document))
+        if project is None and project_path.exists():
+            from uuid import uuid4
+            archive = project_path.with_name(project_path.stem + '.before-source-change-' + uuid4().hex[:8] + '.ptrans.json')
+            candidate.save(archive)
+            log(f'原 PDF 已更新；旧项目已保留至 {archive}。正在重新分析，旧坐标不会套用到新文献。')
+        from .layout_upgrade import EXTRACTION_VERSION, refresh_layout, native_with_manual, reconcile_blocks, NATIVE_ID
         if project is None:
             project = Project(source=source, source_hash=source_hash, options=vars(options).copy(), selected_pages=selected,
-                              pages=[PageInfo(i, float(p.mediabox.width), float(p.mediabox.height), p.rotation) for i, p in enumerate(document)], extraction_version=3)
+                              pages=[PageInfo(i, float(p.mediabox.width), float(p.mediabox.height), p.rotation) for i, p in enumerate(document)], extraction_version=EXTRACTION_VERSION)
+        else:
+            refresh_layout(project, document, cancel, log)
+            project.selected_pages = selected
+        project.options.update({k: vars(options)[k] for k in ('ocr', 'ocr_dpi', 'ocr_rotations', 'translate_figures', 'page_range')})
         ocr = ocr or OCR()
         for index in selected:
             checkpoint(cancel)
@@ -289,9 +340,15 @@ def analyze(source: str, options: Options, save_path: str, cancel: threading.Eve
             try:
                 log(f"分析第 {index + 1}/{len(document)} 页。")
                 figures = figure_rects(page)
-                blocks = native_blocks(page, index, figures)
+                previous = [b for b in project.blocks if b.page == index]
+                blocks = native_with_manual(page, index, figures, previous) if previous else native_blocks(page, index, figures)
+                pinned = [b for b in previous if not NATIVE_ID.fullmatch(b.id)
+                          and (b.status == 'edited' or b.approved or '-m' in b.id or (b.role == 'figure_label' and b.translation))]
+                blocks.extend(pinned)
                 if options.ocr:
-                    blocks.extend(ocr.recognize(page, index, blocks, options, cancel, log))
+                    labels = ocr.recognize(page, index, blocks, options, cancel, log)
+                    from .structure import inside
+                    blocks.extend(b for b in labels if options.translate_figures or not any(inside(b.rect, f) for f in figures))
                 elif options.translate_figures:
                     for number, rect in enumerate(figures):
                         checkpoint(cancel)
@@ -305,13 +362,28 @@ def analyze(source: str, options: Options, save_path: str, cancel: threading.Eve
                 if not blocks:
                     project.warnings.append(f"第 {index + 1} 页未识别出文字，请检查预览或框选补充。")
                 blocks = merge_ocr_paragraphs(blocks, figures)
+                if previous:
+                    blocks = reconcile_blocks(previous, blocks)
                 project.blocks = [b for b in project.blocks if b.page != index] + blocks
                 existing_figures = {i: [u.rect for u in project.units if u.page == i and u.kind == "figure"] for i in selected}
                 existing_figures[index] = [list(r) for r in figures]
                 assign_units(project, existing_figures)
                 project.pages[index].analyzed = True
+                project.extraction_version = EXTRACTION_VERSION
             finally:
                 page.set_rotation(rotation)
             project.save(save_path)
+        existing_figures = {}
+        for index in selected:
+            checkpoint(cancel)
+            page = document[index]
+            rotation = page.rotation
+            page.set_rotation(0)
+            try:
+                existing_figures[index] = [list(r) for r in figure_rects(page)]
+            finally:
+                page.set_rotation(rotation)
+        assign_units(project, existing_figures)
+        project.blocks.sort(key=lambda b: (b.page, b.rect[1], b.rect[0]))
         project.save(save_path)
     return project

@@ -10,6 +10,14 @@ PaperTranslator 是一个 Windows 桌面端的 **PDF 原位翻译与人工校对
 
 默认方向为英语 → 简体中文。内置 DeepSeek、Xiaomi MiMo 预设，也支持任意兼容 Chat Completions 的接口。
 
+当前版本 **1.0.0**：新增可调翻译并发、重复上下文精简和接口用量统计。首页顶部可选择界面语言，默认简体中文；开源提示可点击打开 [GitHub 仓库](https://github.com/foogtil/PaperTranslator)。
+
+**2026-10-30 的 1.1.0 修订**增加公式片段合并、小数尺寸与基线保留、照片旁正文绕图排版及重叠检查。无法安全排版时保留原文供校对。已有 PDF 需重新导出；旧任务会复用结构未变化的译文，结构变化的公式段落保留旧稿等待重新翻译或人工确认，详见[排版修复说明](docs/LAYOUT_FIXES.md)。
+
+同日的[五项回归修复](docs/REVIEW_FIXES.md)进一步保留旧任务的人工修改和页码切换进度，支持竖排公式与普通字体代数表达式，并清除已解决的排版提示。
+
+**2026-10-31 修订**修复异常字体造成的原文残留和中英文叠印，增加写回前的字形删除校验，按对齐的单元格处理表格，并修正短标题续行及 DOI 误识别。详见[字体与表格修复](docs/FONT_TABLE_FIXES.md)。
+
 > 源码保存在本仓库；预编译的 Windows 程序发布在 [Releases](https://github.com/foogtil/PaperTranslator/releases) 页面，由维护者单独上传。也可以按下面的“从源码运行”或“构建 Windows 程序”操作。
 
 ## 下载
@@ -28,7 +36,7 @@ PaperTranslator 是一个 Windows 桌面端的 **PDF 原位翻译与人工校对
 
 | 主界面 | API 与排版设置 |
 |---|---|
-| ![主界面](docs/screenshots/home.png) | ![API 设置](docs/screenshots/api-settings.png) |
+| ![主界面](docs/screenshots/home-zh-CN.png) | ![API 设置](docs/screenshots/api-settings.png) |
 
 ### 段落与整图校对
 
@@ -80,6 +88,12 @@ paper-translator
 `requirements.txt` 固定了本次验证的版本，并包含用于打包的 PyInstaller。只运行源码时，也可以用 `pip install -e .` 安装运行时依赖。
 
 ## 使用步骤
+
+### 界面语言
+
+在首页顶部“PDF 原位翻译与校对”下面选择。支持简体中文、繁體中文、English、日本語、한국어、Deutsch、Français、Español、Português、Русский、العربية、हिन्दी，以及“跟随系统”。初始默认简体中文；选择后立即保存，重新启动应用生效，已有任务和译文保留。
+
+界面语言与 PDF 的原文/目标语言分别保存，切换界面语言不会改变翻译设置或已保存密钥。导航、设置、对话框和排版阶段使用随包离线语言文案；服务商原始回复、底层诊断及部分详细任务日志保持原文。选择界面语言不会增加对应的 OCR 模型或更换翻译服务。
 
 1. 打开 **03 接口与规则**，选择 DeepSeek、Xiaomi MiMo 或“自定义”。填写自己的 API Key，点击 **测试连接**。只有模型支持图片时才勾选“此模型支持图片输入”。
 2. 点击 **添加 PDF** 或直接拖入文件。选择原文/目标语言、页码范围和输出目录。
@@ -175,3 +189,21 @@ python -m unittest discover -s tests -v
 PyMuPDF / MuPDF（Artifex）、RapidOCR 与 PaddleOCR、ONNX Runtime、OpenCV、NumPy、Pillow、HTTPX、TkinterDnD2 / tkdnd、PyInstaller。完整列表和许可位置见 `THIRD_PARTY_NOTICES.md`。
 
 DeepSeek 和小米 MiMo 是外部服务，与本项目没有赞助或背书关系。
+
+## 1.1.0 Token 优化（2026-10-28）
+
+在「接口与规则」中新增默认开启的「精简重复上下文（节省 Token）」，保留完整段落和整图标签；队列显示接口报告的输入、输出、缓存、思考及重试用量。排版溢出后继续处理会复用已有译文。详情与测试限制见 [Token 使用说明](docs/TOKEN_USAGE.md)。
+
+同时新增默认 2 路的翻译并发（可选 1–4），只改变独立请求的发送时机。模型、提示词、段落和整图对应关系保持不变；遇到限流可调回 1。
+# 1.1.0 任务流程修订（2026-11-02）
+
+修复更换输出目录或打开项目后的续传、多窗口保存冲突、图中文字开关、直接导出页码、原 PDF 更新后的重新分析，以及接口读取超时。旧译文与人工校对可继续使用，原 PDF 更新时会独立保留旧项目。接口默认等待 180 秒，可取消；断流或读取超时不再自动反复重发。详情见 [任务与接口修订](docs/WORKFLOW_FIXES.md)。
+
+
+## 1.0.0 统一发布与安装版（2026-11-02）
+
+当前修复后的程序统一编号为 1.0.0，同时提供 `PaperTranslator-1.0.0-Standalone.exe`（直接运行）和 `PaperTranslator-1.0.0-Setup.exe`（安装版）。包含此前 1.1.0 的全部修复，采用“书页打开山水之境”的文献译境图标。历史修订标题保留作变更记录。
+
+安装版默认安装到当前用户的 `%LOCALAPPDATA%\Programs\PaperTranslator`，支持选择安装目录、开始菜单快捷方式、可选桌面快捷方式和卸载。无需安装 Python。卸载保留用户设置、密钥和翻译进度。便携版和安装版使用同一 Windows 用户的数据目录；密钥由各使用者自行配置。
+
+构建安装包：先运行 `python scripts/build.py`，再运行 `python scripts/build_installer.py --compiler "路径/ISCC.exe"`。安装包编译器使用 [Inno Setup 7](https://jrsoftware.org/isdl.php)。

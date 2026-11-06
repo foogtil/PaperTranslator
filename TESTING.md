@@ -64,6 +64,16 @@ PaperTranslator.exe --self-test selftest-report.json
 
 发布整理时清除了旧版本、虚拟环境、构建目录和中间测试输出，保留当前源码、测试代码、依赖材料与本记录。上文各 `test-output/` 路径记录的是检查发生时的位置，原始测试产物不再随当前文件夹保留。
 
+1.0.0 界面语言与仓库链接：73 项源码回归全部通过。新增覆盖原文语言列表与全部 UI 语言的对应、各语言文案完整性和格式占位符、系统语言解析及未知语言回退、翻译语言和服务商选择保持内部原值、动态提示翻译、原文路径不被本地化，以及语言偏好只修改 `ui_language` 而不解密或重写加密密钥。初次全套运行有一次测试夹具直接写入临时 JSON 时发生 OSError 22，单独重跑该模块及最终全套均通过，未改写应用任务保存逻辑。
+
+源码自检 40 项通过，新增 GitHub 点击目标、简体中文默认值、控件位于副标题下方、语言偏好与任务独立保存，以及 12 种语言加“跟随系统”共 13 个选项分别启动实际 Tk 窗口；核对导航和按钮翻译、原文编辑内容原样保留、自定义服务商内部标识正确。自检使用隔离设置、模拟密钥和合成 PDF，不访问付费 API。报告记录在 `test-output/v1.0.0-source/report.json`。
+
+`scripts/check_localized_ui.py` 在 1050×740 的最小测试窗口下检查全部 13 个选项，语言控件和开源链接均位于可见边界内，无 Tk 回调异常；生成了简中、英语、德语、阿拉伯语、印地语截图。简中、英语、阿拉伯语截图已检查，窗口内原生文字可显示。截图用 HWND 捕获物理像素，避免 Windows DPI 虚拟化导致截图裁切。报告为 `test-output/v1.0.0-languages/report.json`。语言包未经过全部语种母语使用者校对；外部返回和部分诊断日志按原文显示。
+
+1.0.0 的 1500 次可见窗口连续操作和实际 40 页分析 / 导出 / 取消 / 关闭检查通过，无回调错误。第 250–1500 次采样 GDI 对象恒为 67、用户对象恒为 171、进程句柄恒为 324、Tk 图片恒为 10。心跳 2193 次，最大间隔约 0.158 秒。报告为 `test-output/v1.0.0-stability/report.json`；不代替多小时、多设备验证。
+
+1.0.0 目录版、单文件版在移除外部 Python 环境路径后各 40 项自检全部通过，退出码均为 0，`ok: true`。包含 13 个语言选项实际启动、语言偏好隔离保存、文献内容保留、GitHub 链接目标、离线 OCR、实际冻结子进程分析 / 导出 / 取消及强制停止。两个 exe 全部应用模块的字节码均与当前源码一致；两版内置 `locales.tsv` 与源码逐字节一致，单文件内完整 LICENSE 也与根目录一致。报告记录为 `test-output/v1.0.0-portable/report.json` 和 `test-output/v1.0.0-single/report.json`。
+
 源码测试报告、打包自检报告和本机视觉检查结果由交付时写入此文档或随包报告。未完成的验证包括：
 
 - 使用用户实际 DeepSeek / MiMo 账户完成端到端翻译及图片请求。
@@ -72,3 +82,68 @@ PaperTranslator.exe --self-test selftest-report.json
 - 没有安装 Python 的独立 Windows 10 / 11 电脑、不同 DPI 与硬件的测试。
 
 以上仍需在真实账户、代表性论文和独立 Windows 设备上验收；软件没有宣称对任意 PDF 做到全自动、无错误、逐字位置完全一致。
+
+## 1.1.0 Token optimization verification — 2026-10-28
+
+- 90 offline unit tests passed, including 17 new context/usage/retry regression tests.
+- Source self-test: all 44 checks passed, including OCR, GUI/worker events, persistence, original PDF geometry, and the new context/usage checks. Raster fixture still flags two regions for review, as before; this is not a claim of perfect OCR.
+- Synthetic full-vs-compact comparison: 216 translated IDs and 30 requests in both modes; input text 741038 -> 309984 characters (58.17% lower). This is a serialized-text measurement, not measured provider tokens, fees, or real translation quality.
+- Reports: `test-output/token-optimization/`. All API tests use offline transports and isolated settings; no user API keys or AppData jobs are accessed.
+- New options and usage messages are covered in all existing UI languages.
+- Frozen EXE validation and retained-version integrity results are recorded below after packaging.
+
+### Concurrency follow-up
+
+- 98 unit tests passed, including 8 concurrency tests: identical serial/parallel payloads, bounds, per-thread retry state, cancellation, retained results, atomic saves, usage sums, serialized IPC, and PDF crops on the owner thread.
+- Source self-test before the additional frozen HTTP concurrency probe: all 45 checks passed. Final packaged self-tests include that additional probe (46 checks).
+- Simulated 30-response latency: 1.271 seconds with 1 worker, 0.643 seconds with 2 workers, unchanged inputs and requested IDs. This is not a live-service speed guarantee.
+- GUI stability run before the concurrency selector: 1500 operations and a 40-page fixture export passed; GDI 64, user handles 165, process handles 274, Tk images 10 stayed stable, no callbacks failed.
+- New context control fitted all 13 UI choices at 1050×740. Usage remains visible in the fixed queue footer; settings hints wrap in equal-width columns.
+- Other-version integrity: all 1602 protected files matched their pre-edit hashes.
+
+### Final 1.1.0 distribution
+
+- Standalone and directory executables each passed all 46 offline checks with external Python paths removed. Exit code 0 for both. Reports: `test-output/v1.1.0-single/report.json` and `test-output/v1.1.0-portable/report.json`. The frozen probes include two simultaneous HTTP requests with correct ID mapping and all real spawned-worker paths.
+- Both executables contain application bytecode matching every current Python source module. The standalone locale catalog and LICENSE match source bytes. No settings.json, .env, saved private projects or logs are bundled.
+- At 1050×740, usage and the concurrency control fitted all 13 UI choices, with default concurrency 2. Report: `test-output/token-optimization/ui-v110/report.json`.
+- Original 1.0.0 was restored from the pre-edit backup and verified against 1427 archive/hash entries. Original 0.2.4 files remain unchanged. New builds now also retain a versioned standalone EXE in release/.
+
+## 1.1.0 layout revision — 2026-10-30
+
+- 110 offline unit tests passed. The 12 new layout tests cover split hats/scripts, fractional formula dimensions, baseline alignment, picture exclusion, complete wrapped text, 90/270-degree pages, local rotation transforms, formula labels inside figures, overflow, cancellation, stale saved drafts after a failed retry, and visible collisions. The existing header/title separation regression also passes.
+- Source GUI/OCR/worker self-test passed all 52 checks. Six new probes run inside both source and packaged self-tests: whole formula grouping, vector geometry/baselines, photo pixels, complete wrapped text, stale-draft retention, and overflow retention.
+- Real-document offline checks: the selected ARIMA paper pages 8–9 exported 18 prepared translation regions in approximately 3.7 seconds; two labels touching underbraces safely retained the original text and remained flagged for review. Human-prepared Chinese text and current formula markers were used as layout input, not a live model-quality evaluation.
+- The selected author-biography page exported 17 regions in approximately 1.3 seconds. All five photo rectangles rendered identically to the source at 144 DPI. Existing translated text was reused for this layout test; no paid API request was made.
+- Those three output pages were rendered and visually reviewed. Native formula content remains vector-based. A broad OCR repair box crossing a picture boundary now retains the original image rather than inpainting the photograph.
+- Tests use isolated settings and synthetic jobs. Real source PDFs, existing user output PDFs and AppData jobs/settings are not modified. Private document diagnostics stay under `test-output/layout-fix-20261030/`, outside distribution whitelists.
+- Both revised 1.1.0 executables passed all 52 packaged self-tests with external Python search paths removed, exit code 0. This includes the six new layout probes and real spawned-worker, OCR and multilingual GUI checks. Reports: `test-output/layout-fix-20261030/single/report.json` and `test-output/layout-fix-20261030/portable/report.json`.
+- Every application module in both executables matches the current Python source bytecode. This is a local packaging check, not a test on a separate computer without Python installed.
+
+## 1.1.0 five review fixes — 2026-10-30
+
+- Added 12 regression tests covering version-3/4 manual source corrections, direction/vertical/keep flags, changed paragraph boundaries without duplicated glyphs, page-range expansion/shrink/re-expansion, retained usage, selected-page-only requests, reanalysis reuse, and continued language-change invalidation.
+- Final full suite: all 122 unit tests passed in approximately 21.9 seconds.
+- Formula checks cover ordinary-font vector objects, rejected simulated operator changes, saved/manual formula validation, natural-language compound and metric labels, Chinese text adjacent to algebra, invalid/extended expressions, vertical vector formulas, missing vertical markers, and recomputed overflow warnings while retaining OCR notes.
+- The source self-test passed all 58 checks. Six additional packaged probes cover ordinary-font formula extraction and request protection, vertical formulas, manual-upgrade retention, retained page-range work/usage, and resolved overflow notes.
+- A fresh 1500-operation GUI run plus 40-page analysis/export/cancel/close passed. GDI 64, USER 168, handles 274 and Tk images 10 stayed constant in iterations 250–1500. No callbacks failed; maximum heartbeat gap was approximately 0.230 seconds. This is not a multi-hour or multi-device test.
+- The user's selected pages were re-exported offline: the formula pages retained 18 prepared regions with two underbrace labels still safely left for review; all five photo rectangles remained pixel-identical at 144 DPI. No source document, user output, AppData task or real API key was modified.
+- Evidence is under `test-output/five-fixes-20261030/`, outside release whitelists. All API behavior tests use offline simulated responses.
+- Final standalone and portable executables each passed all 58 packaged self-tests with external Python search paths removed, exit code 0. Both executables' application modules match the final source bytecode. Reports: `test-output/five-fixes-20261030/single/report.json` and `test-output/five-fixes-20261030/portable/report.json`.
+
+## 1.1.0 font and table revision — 2026-10-31
+
+- All 135 unit tests passed (approximately 25.1 seconds). Thirteen new tests cover the reproduced short-ascent font erasure failure, baseline-based erasure in cardinal directions/cropped pages, unchanged neighbours, pre-overlay rejection of incomplete or unintended deletion, numeric table positions and neighbouring prose, version-5 cache migration, DOI retemplating, short title tails, dense-cell margins, exact spatial collision queries, and high-zoom raster erasure.
+- Source, standalone and portable self-tests each passed all 63 checks. Five added frozen checks cover the nonstandard font fixture, numeric table extraction, adjacent prose, DOI recognition, and raster repair without gray glyph outlines at 600 DPI while retaining an adjacent axis. Packaged tests removed external Python search paths; this remains a local test, not a separate-device compatibility claim.
+- Every application Python module in both executables matches current source bytecode. The custom metric-font fixture uses original rectangle glyphs; its optional regeneration script is included. No third-party paper is bundled as a fixture.
+- The user's full 17-page sample was re-exported offline from an isolated cache copy. Existing translations were reused; the newly separated title/table text was reviewed locally. No paid API calls or saved keys were used, and the original PDF, original translated PDF and actual AppData task were not overwritten.
+- The sample's 313 modified regions were checked with rendered pages. Dense/complex regions that still cannot fit safely retain their original text for review. This is a layout repair, not a claim that all model wording and all OCR labels have been semantically verified.
+- Public packages exclude `test-output/` and the private repaired-PDF folder. The detailed local evidence is under `test-output/disease-20261031/`.
+# 1.1.0 workflow revision — 2026-11-02
+
+- All 149 unit tests passed in 34.317 seconds. Fourteen added tests cover task identity across output directories, explicitly opened project continuation, old-cache discovery, wrong-project rejection, interprocess ownership and forced-process-exit release, stale editor protection, unique atomic temporary files, source updates with preserved history, changed export ranges, unanalyzed export pages, disabled cached figure labels and OCR filtering, configured read timeouts without automatic resubmission, and real socket cancellation/reconnection.
+- Source, standalone and portable self-tests each passed all 72 checks. The nine added packaged checks include actual process locks and a temporary HTTP server bound to 127.0.0.1; no external provider or real API key is used. Packaged checks remove external Python search paths.
+- Both executable archives contain application bytecode matching all current source modules, including the asynchronous socket bridge and task-lock implementation.
+- The actual GUI continuation path preserved the manually corrected paragraph and requested only the pending paragraph. The earlier audit probe now retains both cached translations after changing output directories, sends no disabled image labels after actual OCR, and makes one request on a simulated read timeout.
+- 1,500 GUI operations plus a 40-page analysis/export/cancel/close run passed. From iteration 250 through 1,500, GDI objects stayed at 64, user objects at 168, handles at 274 and Tk images at 10. No callback errors; largest heartbeat gap approximately 0.159 seconds. This is not a multi-hour or separate-device guarantee.
+- Evidence: `test-output/fix-20261102/`, excluded from public source and executable packages. The previous diagnostic report is retained separately under `test-output/audit-20261102/`.
+

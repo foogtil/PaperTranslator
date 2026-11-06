@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.metadata as metadata
+import argparse
 import ast
 import hashlib
 import json
@@ -128,19 +129,37 @@ def source_archive(destination):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--licenses-only', action='store_true')
+    parser.add_argument('--package-only', action='store_true')
+    parser.add_argument('--distpath', type=Path, default=ROOT/'dist'/f'v{__version__}')
+    parser.add_argument('--workpath', type=Path, default=ROOT/'build'/f'v{__version__}')
+    parser.add_argument('--releasepath', type=Path, default=ROOT/'release')
+    args = parser.parse_args()
     collect_licenses()
-    if "--licenses-only" in sys.argv:
+    if args.licenses_only:
         return
     verify_vendor_sources()
-    dist = ROOT / "dist" / f"v{__version__}"
-    work = ROOT / "build" / f"v{__version__}"
-    if "--package-only" not in sys.argv:
+    dist, work = args.distpath.resolve(), args.workpath.resolve()
+    if not args.package_only:
+        # PyInstaller tracks the icon path, but can reuse an EXE when only the
+        # contents at that path change. Invalidate EXE caches on artwork changes.
+        icon_digest = hashlib.sha256((ROOT / "assets" / "icon.ico").read_bytes()).hexdigest()
+        icon_stamp = work / "icon.sha256"
+        if not icon_stamp.exists() or icon_stamp.read_text(encoding="ascii") != icon_digest:
+            for toc in (work / "PaperTranslator").glob("EXE-*.toc"):
+                toc.unlink()
         subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--distpath", str(dist), "--workpath", str(work), str(ROOT / "PaperTranslator.spec")], cwd=ROOT, check=True)
-    destination = ROOT / "release"
-    destination.mkdir(exist_ok=True)
+        icon_stamp.write_text(icon_digest, encoding="ascii")
+    destination = args.releasepath.resolve()
+    destination.mkdir(parents=True, exist_ok=True)
     source = destination / f"PaperTranslator-{__version__}-source.zip"
     source_archive(source)
     shutil.copy2(dist / "PaperTranslator-Standalone.exe", destination / "PaperTranslator-Standalone.exe")
+    # Keep a versioned standalone alongside the latest alias so publishing a
+    # new release does not replace the only copy of an earlier executable.
+    versioned_exe = destination / f"PaperTranslator-{__version__}-Standalone.exe"
+    shutil.copy2(dist / "PaperTranslator-Standalone.exe", versioned_exe)
     portable = dist / "PaperTranslator"
     for name in ("README.md", "README.zh-CN.md", "DEFAULTS.md", "TESTING.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"):
         shutil.copy2(ROOT / name, portable / name)
@@ -149,9 +168,8 @@ def main():
     # Ship the verified corresponding PyMuPDF/MuPDF and other third-party sources.
     shutil.copytree(ROOT / "vendor-sources", portable / "vendor-sources", dirs_exist_ok=True)
     shutil.make_archive(str(destination / f"PaperTranslator-{__version__}-Windows-x64"), "zip", dist, "PaperTranslator")
-    import hashlib
     hashes = {}
-    for path in list(destination.glob(f"*{__version__}*.zip")) + list(dist.glob("*.exe")):
+    for path in list(destination.glob(f"*{__version__}*.zip")) + list(dist.glob("*.exe")) + [versioned_exe]:
         with open(path, "rb") as handle:
             hashes[path.name] = hashlib.file_digest(handle, "sha256").hexdigest()
     (destination / f"SHA256-{__version__}.json").write_text(json.dumps(hashes, indent=2), encoding="utf-8")

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paper-translator"
-version = "0.2.4"
+version = "1.0.0"
 description = "Position-preserving PDF translation and review desktop application"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -40,3 +40,6 @@ paper-translator = "papertranslator.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["papertranslator*"]
+
+[tool.setuptools.package-data]
+papertranslator = ["locales.tsv"]

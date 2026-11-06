@@ -71,6 +71,9 @@ class APISettingsTests(unittest.TestCase):
     def test_gui_rejects_bad_credentials_before_analysis_and_task_launch(self):
         from papertranslator.gui import App
         app = Mock()
+        from papertranslator.localization import LocalizedDialogs, Localizer
+        from papertranslator.gui import messagebox
+        app.messages = LocalizedDialogs(messagebox, Localizer())
         app.busy = False
         app.files = ['offline.pdf']
         app._options.return_value = Options(ocr=False)

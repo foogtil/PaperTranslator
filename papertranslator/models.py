@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import threading
+import tempfile
 import time
 from typing import Any
 
@@ -30,22 +31,26 @@ def digest_file(path: str | Path) -> str:
 def atomic_json(path: str | Path, data: Any) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as handle:
-        json.dump(data, handle, ensure_ascii=False, indent=2, allow_nan=False)
-        handle.flush()
-        os.fsync(handle.fileno())
+    fd, name = tempfile.mkstemp(prefix=path.name + '.', suffix='.tmp', dir=path.parent)
+    tmp = Path(name)
     # On Windows, a reader (including the UI or an antivirus scanner) can hold
     # a short-lived handle without FILE_SHARE_DELETE. Retry only sharing/access
     # conflicts, with a bounded wait, keeping the previous snapshot intact.
-    for attempt in range(8):
-        try:
-            os.replace(tmp, path)
-            break
-        except PermissionError as error:
-            if os.name != "nt" or getattr(error, "winerror", None) not in (5, 32, 33) or attempt == 7:
-                raise
-            time.sleep(min(0.01 * 2 ** attempt, 0.25))
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2, allow_nan=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        for attempt in range(8):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError as error:
+                if os.name != 'nt' or getattr(error, 'winerror', None) not in (5, 32, 33) or attempt == 7:
+                    raise
+                time.sleep(min(0.01 * 2 ** attempt, 0.25))
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def dataclass_from(cls, data: dict):
@@ -100,11 +105,15 @@ class Options:
     glossary: dict[str, str] = field(default_factory=dict)
     font_path: str = ""
     batch_chars: int = 4500
+    compact_context: bool = True
+    translation_workers: int = 2
     translate_figures: bool = True
     pdf_review_marks: bool = False
     export_json: bool = False
 
     def validate(self):
+        if type(self.translation_workers) is not int or not 1 <= self.translation_workers <= 4:
+            raise ValueError("同时翻译请求数应为 1 至 4。")
         if not self.target_language.strip() or self.target_language == "自动检测":
             raise ValueError("请选择或输入目标语言。")
         if not 96 <= self.ocr_dpi <= 400:
@@ -141,10 +150,28 @@ class Block:
     unit_id: str = ""
     template: str = ""
     inline: list[dict] = field(default_factory=list)
+    glyphs: list[list[float]] = field(default_factory=list)
+    layout_stale: bool = False
 
     def note(self, text: str):
         if text not in self.notes:
             self.notes.append(text)
+
+    def accept_layout(self):
+        self.layout_stale = False
+        self.notes = [n for n in self.notes if not n.startswith("公式或段落结构已更新；")]
+
+    def clear_export_notes(self):
+        # Recompute export diagnostics on each attempt. OCR/model/manual review
+        # notes remain; only known layout checks are transient.
+        prefixes = ("译文在原区域内无法以最低 ", "相邻译文排版重叠，", "译文与图片或相邻内容相交，",
+                    "公式与段落文字相交，", "公式上下标超出段落边界，", "公式纵横比例校验未通过，",
+                    "段内公式占位符缺失或重复，", "段内公式排版未完整定位，", "旋转或竖排区域与相邻内容相交，",
+                    "原页含尚未应用的涂黑批注", "文字与受保护公式重叠，", "文字区域超出页面", "缺少译文，",
+                    "扫描文字区域跨越图片边界，", "OCR 置信度低于 75%", "图中文字背景复杂，",
+                    "图中文字与图形重叠较多，", "图像修补编码失败", "竖排公式在原区域内无法完整放下，",
+                    "译文改变了普通字体公式，", "原文字形删除校验未通过，")
+        self.notes = [n for n in self.notes if not n.startswith(prefixes)]
 
 
 @dataclass
@@ -155,6 +182,17 @@ class PageInfo:
     rotation: int
     analyzed: bool = False
     vision_analyzed: bool = False
+
+
+def has_translation(block: Block) -> bool:
+    """A layout overflow retains a valid translation for the next export."""
+    return not block.layout_stale and (block.status in ("translated", "edited", "preserved") or (
+        block.status == "overflow" and bool(block.translation.strip())))
+
+
+def block_enabled(block: Block, options: Options) -> bool:
+    # Captions remain prose; only labels within a figure follow this switch.
+    return options.translate_figures or block.role != 'figure_label'
 
 
 @dataclass
@@ -185,19 +223,31 @@ class Project:
     # Never serialize credentials, even if Options gains new fields later.
 
     def save(self, path: str | Path):
-        atomic_json(path, asdict(self))
+        from .locking import identity, job_lock, save_guard
+        with save_guard, job_lock(self.source):
+            key = identity(path)
+            snapshots = getattr(self, '_snapshots', {})
+            expected = snapshots.get(key)
+            if expected is not None and (not Path(path).exists() or digest_file(path) != expected):
+                raise ValueError('此项目已由另一个窗口更新，请重新载入校对后再保存，避免覆盖较新的进度。')
+            atomic_json(path, asdict(self))
+            snapshots[key] = digest_file(path)
+            self._snapshots = snapshots
 
     @classmethod
     def load(cls, path: str | Path, verify: bool = True):
         # Release the Windows file handle before parsing a large JSON snapshot,
         # so it cannot block the worker's next atomic replacement.
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        contents = Path(path).read_bytes()
+        data = json.loads(contents)
         if data.get("schema") != 1:
             raise ValueError("不支持的项目版本。")
         data["pages"] = [dataclass_from(PageInfo, p) for p in data.get("pages", [])]
         data["blocks"] = [dataclass_from(Block, b) for b in data.get("blocks", [])]
         data["units"] = [dataclass_from(Unit, u) for u in data.get("units", [])]
         project = dataclass_from(cls, data)
+        from .locking import identity
+        project._snapshots = {identity(path): hashlib.sha256(contents).hexdigest()}
         if verify and (not Path(project.source).is_file() or digest_file(project.source) != project.source_hash):
             raise ValueError("原 PDF 不存在或内容已变化；为避免错位，请重新分析。")
         return project

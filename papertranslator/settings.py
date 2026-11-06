@@ -81,3 +81,16 @@ def save_settings(settings: dict, remember: bool = False):
         if remember and secret:
             profile["key_dpapi"] = seal(secret)
     atomic_json(data_dir() / "settings.json", result)
+
+
+def save_ui_language(language: str):
+    """Patch only the UI preference, without decrypting or rewriting keys."""
+    from .localization import UI_LANGUAGES
+    if language not in UI_LANGUAGES:
+        raise ValueError("不支持的界面语言。")
+    path = data_dir() / "settings.json"
+    result = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    if not isinstance(result, dict):
+        raise ValueError("设置文件格式无效。")
+    result["ui_language"] = language
+    atomic_json(path, result)

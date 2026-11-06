@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+from contextlib import ExitStack
+import threading
 from pathlib import Path
 
 from .models import Cancelled, Options, Project, Provider, checkpoint, dataclass_from
+from .locking import job_lock
 
 
 def execute(request, cancel, messages):
@@ -19,19 +22,22 @@ def execute(request, cancel, messages):
         messages.put((kind, value))
 
     engine = Engine(log=lambda text: emit("log", text), cancel=cancel,
-                    progress=lambda data: emit("progress", data))
+                    progress=lambda data: emit("progress", data),
+                    on_usage=lambda data: emit("usage", data))
     options = dataclass_from(Options, request["options"])
     try:
         if request["kind"] == "export":
             path = Path(request["project_path"])
-            project = Project.load(path)
-            try:
-                emit("project_path", (project.source, str(path)))
-                report = engine.export(project, request["output"], options, path)
-                emit("log", f"已导出 {request['output']}；{len(report['needs_review'])} 个区域需校对。")
-            finally:
-                project.save(path)
-                emit("project_path", (project.source, str(path)))
+            source = Project.load(path, verify=False).source
+            with job_lock(source):
+                project = Project.load(path)
+                try:
+                    emit("project_path", (project.source, str(path)))
+                    report = engine.export(project, request["output"], options, path)
+                    emit("log", f"已导出 {request['output']}；{len(report['needs_review'])} 个区域需校对。")
+                finally:
+                    project.save(path)
+                    emit("project_path", (project.source, str(path)))
             return
         if request["kind"] != "queue":
             raise ValueError("未知的后台任务。")
@@ -40,9 +46,11 @@ def execute(request, cancel, messages):
             checkpoint(cancel)
             emit("log", f"[{number}/{len(files)}] {Path(source).name}")
             artifact = project_path(source, str(output))
-            path = resume_project_path(source, str(output))
             project = None
+            owner = ExitStack()
             try:
+                owner.enter_context(job_lock(source))
+                path = resume_project_path(source, str(output), request.get('project_paths', {}).get(source))
                 project = engine.analyze(source, options, path)
                 if request["mode"] == "analyze":
                     info = estimate(project, provider, options)
@@ -70,9 +78,12 @@ def execute(request, cancel, messages):
                 if len(files) == 1:
                     raise
             finally:
-                if project is not None:
-                    project.save(path)
-                    emit("project_path", (source, str(path)))
+                try:
+                    if project is not None:
+                        project.save(path)
+                        emit("project_path", (source, str(path)))
+                finally:
+                    owner.close()
     except Cancelled as error:
         emit("log", str(error))
     except Exception as error:
@@ -84,9 +95,17 @@ def execute(request, cancel, messages):
 class _MessageSender:
     def __init__(self, connection):
         self.connection = connection
+        self.lock = threading.Lock()
+
+    def __getstate__(self):
+        return {"connection": self.connection}
+
+    def __setstate__(self, state):
+        self.__init__(state["connection"])
 
     def put(self, message):
-        self.connection.send(message)
+        with self.lock:
+            self.connection.send(message)
 
 
 class PDFWorker:

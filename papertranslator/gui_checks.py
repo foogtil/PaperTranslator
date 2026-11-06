@@ -5,8 +5,11 @@ import queue
 import copy
 import threading
 import time
+import json
+import os
 from pathlib import Path
 from tkinter import ttk
+from unittest.mock import patch
 
 from .models import Options, Project
 from .worker import PDFWorker, _MessageSender
@@ -40,11 +43,71 @@ def run_gui_checks(app, project, path, directory):
                        and button.instate(["selected"]) != before)
         button.invoke()
         toggled.append(root.getboolean(root.getvar(button.cget("variable"))) == before)
-    checks["checkbox_tick_and_states"] = (len(buttons) == 14 and all(toggled)
+    checks["checkbox_tick_and_states"] = (len(buttons) == 15 and all(toggled)
         and "PaperTranslator.Check.indicator" in repr(ttk.Style(root).layout("TCheckbutton")))
     labels = [str(w.cget("text")) for w in descendants(root) if w.winfo_class() == "Label"]
     checks["header_subtitle_removed"] = "PDF 原位翻译与校对" in labels and not any("计算机" in v and "数学" in v for v in labels)
     checks["opensource_notice"] = "PaperTranslator 已在 GitHub 上开源" in labels
+    from . import PROJECT_URL
+    from .localization import UI_LANGUAGES, Localizer, resolve_language
+    from .settings import data_dir, save_ui_language
+    from .gui import App, make_root
+    with patch("papertranslator.gui.webbrowser.open") as opened:
+        app._open_repository()
+        checks["github_repository_link"] = (PROJECT_URL == "https://github.com/foogtil/PaperTranslator"
+            and opened.call_args.args == (PROJECT_URL,) and bool(app.opensource_label.bind("<Button-1>"))
+            and app.opensource_label.cget("cursor") == "hand2")
+    checks["ui_language_default_and_coverage"] = (app.tr.language == "zh-CN"
+        and app.ui_language_var.get() == "简体中文"
+        and tuple(app.ui_language_combo.cget("values")) == tuple(UI_LANGUAGES.values()))
+    root.update_idletasks()
+    subtitle = app.ui_language_combo.master.master
+    subtitle_label = subtitle.winfo_children()[0]
+    checks["ui_language_control_position"] = (app.ui_language_combo.winfo_rooty() >=
+        subtitle_label.winfo_rooty() + subtitle_label.winfo_height())
+    original_preferences = (data_dir() / "settings.json").read_bytes() if (data_dir() / "settings.json").exists() else None
+    original_language, profiles = app.ui_language, copy.deepcopy(app.profiles)
+    document_languages = (app.source_var.get(), app.target_var.get())
+    with patch("papertranslator.gui.messagebox.showinfo"):
+        app.ui_language_var.set("English")
+        app._change_ui_language()
+    saved_preferences = json.loads((data_dir() / "settings.json").read_text(encoding="utf-8"))
+    prior_preferences = json.loads(original_preferences) if original_preferences else {}
+    checks["ui_language_preference_is_independent"] = (saved_preferences.pop("ui_language") == "en"
+        and {k: v for k, v in prior_preferences.items() if k != "ui_language"} == saved_preferences
+        and app.profiles == profiles and app.tr.language == "zh-CN"
+        and (app.source_var.get(), app.target_var.get()) == document_languages)
+    save_ui_language(original_language)
+    app.ui_language, app.settings["ui_language"] = original_language, original_language
+    app.ui_language_var.set(UI_LANGUAGES[original_language])
+    language_results = []
+    for code in UI_LANGUAGES:
+        with patch.dict(os.environ, {"PAPERTRANSLATOR_DATA_DIR": str(Path(directory) / "locale-checks" / code)}):
+            save_ui_language(code)
+            localized_root = make_root()
+            localized_root.withdraw()
+            localized_app = App(localized_root)
+            try:
+                localized_root.update_idletasks()
+                tr = Localizer(code)
+                good = (localized_app.tr.language == resolve_language(code)
+                    and localized_app.ui_language_var.get() == UI_LANGUAGES[code]
+                    and localized_app.notebook.tab(0, "text") == tr("01  翻译队列")
+                    and localized_app.analyze_button.cget("text") == tr("① 分析版面 / 估算费用")
+                    and localized_app._options().source_language == "英语"
+                    and localized_app._options().target_language == "简体中文")
+                localized_app._show_project(project, path)
+                block = project.blocks[0]
+                localized_app.block_tree.selection_set(block.id)
+                localized_app._select_block()
+                good = good and localized_app.source_text.get("1.0", "end-1c") == block.text
+                localized_app.provider_var.set("自定义")
+                localized_app._switch_profile()
+                good = good and localized_app.current_provider == "自定义"
+                language_results.append(good)
+            finally:
+                localized_app._destroy()
+    checks["all_ui_languages_start_and_keep_document_data"] = all(language_results) and len(language_results) == 13
     saved_profiles, saved_provider = copy.deepcopy(app.profiles), app.current_provider
     app.provider_var.set("DeepSeek")
     app._switch_profile()
@@ -74,6 +137,28 @@ def run_gui_checks(app, project, path, directory):
     app._load_options()
     app._load_options(project.options)
     checks["export_preferences_persist"] = app.review_marks_var.get() and app.export_json_var.get()
+    app.compact_context_var.set(False)
+    app.translation_workers_var.set("3")
+    app._save_all(show=False, validate=False)
+    saved_context = load_settings()["options"]["compact_context"]
+    checks["translation_concurrency_preference_persists"] = load_settings()["options"]["translation_workers"] == 3
+    app.compact_context_var.set(True)
+    app._load_options({"compact_context": False})
+    checks["compact_context_preference_persists"] = saved_context is False and app._options().compact_context is False
+    sample_usage = {"input_tokens": 123, "output_tokens": 45, "requests": 2,
+                    "cached_input_tokens": 60, "cache_reported_requests": 1,
+                    "reasoning_tokens": 20, "reasoning_reported_requests": 1,
+                    "retry_requests": 1, "usage_missing_requests": 1,
+                    "translation_input_tokens": 123, "translation_output_tokens": 45, "translation_requests": 2}
+    app.events.put(("usage", sample_usage))
+    # Drive the same bounded event loop that receives worker usage snapshots.
+    root.update()
+    deadline = time.monotonic() + 1
+    while "123" not in app.usage_var.get() and time.monotonic() < deadline:
+        root.update()
+        time.sleep(0.01)
+    checks["usage_panel_worker_event"] = (all(value in app.usage_var.get() for value in ("123", "45", "60", "20", "168"))
+        and app.usage_label.master is app.queue_actions)
     app.settings = old_settings
     app._load_options()
     app._save_all(show=False, validate=False)

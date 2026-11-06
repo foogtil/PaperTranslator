@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from collections import Counter
 import html
-import math
 import os
 from pathlib import Path
 import tempfile
@@ -12,52 +10,12 @@ import numpy as np
 import pymupdf as fitz
 
 from . import __version__
-from .models import Block, Options, Project, atomic_json, checkpoint, digest_file
+from .models import Block, Options, Project, atomic_json, checkpoint, digest_file, parse_pages, block_enabled
+from .flow import flow_paragraph, local_obstacles, vertical_paragraph
+from .redaction import RectIndex
 
 
-def _inline_page(page, block, markup, css, archive, minimum, font, source):
-    """Flow one translated paragraph around immutable formula objects.
-
-    Story lays out temporary blank inline images. Their actual PDF image boxes
-    locate the original vector formula snippets, which replace the blanks.
-    """
-    from .structure import MATH_MARKER
-    if Counter(MATH_MARKER.findall(block.translation)) != Counter(i["marker"] for i in block.inline):
-        block.note("段内公式占位符缺失或重复，保留原文，请恢复公式占位符后导出。")
-        return None
-    archive = archive or fitz.Archive()
-    blank = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 2, 2), False)
-    blank.clear_with(255)
-    archive.add((blank.tobytes("png"), "inline-blank.png"))
-    by_marker = {i["marker"]: i for i in block.inline}
-    order = MATH_MARKER.findall(block.translation)
-    def replace(match):
-        rect = fitz.Rect(by_marker[match.group(0)]["rect"])
-        return f'<img src="inline-blank.png" width="{rect.width:.3f}" height="{rect.height:.3f}"/>'
-    markup = MATH_MARKER.sub(replace, markup)
-    story = fitz.Story(html=markup, user_css="body{margin:0;}" + css, archive=archive)
-    fit = story.fit_scale(page.rect, scale_min=1, scale_max=1 / max(0.05, minimum / font))
-    if not fit.big_enough:
-        return None
-    with story.write_with_links(lambda *args: (fit.rect, fit.rect, None)) as flowed:
-        images = flowed[0].get_image_info()
-        if len(images) != len(order):
-            block.note("段内公式排版未完整定位，保留原文。")
-            return None
-        original = source[block.page]
-        rotation = original.rotation
-        original.set_rotation(0)
-        try:
-            for marker, image in zip(order, images):
-                flowed[0].show_pdf_page(fitz.Rect(image["bbox"]), source, block.page,
-                                        clip=fitz.Rect(by_marker[marker]["rect"]), keep_proportion=False)
-        finally:
-            original.set_rotation(rotation)
-        page.show_pdf_page(page.rect, flowed, 0, keep_proportion=False)
-    return 1 / fit.parameter
-
-
-def _text_page(scratch, block: Block, options: Options, source=None):
+def _text_page(scratch, block: Block, options: Options, source=None, obstacles=(), cancel=None):
     angle = block.angle % 360
     rect = fitz.Rect(block.rect)
     cardinal = round(angle / 90) * 90 % 360
@@ -69,49 +27,91 @@ def _text_page(scratch, block: Block, options: Options, source=None):
         height = block.local_height or rect.height
     if width < 0.5 or height < 0.5:
         return None
+    if not block.inline:
+        from .math_text import unchanged_math
+        if not unchanged_math(block.text, block.translation):
+            block.note("译文改变了普通字体公式，保留原文，请核对公式。")
+            return None
+    local = local_obstacles(block, obstacles)
+    if local is None:
+        block.note("旋转或竖排区域与相邻内容相交，保留原文，请调整区域。")
+        return None
     page = scratch.new_page(width=width, height=height)
     font = max(3.0, block.fontsize)
     minimum = min(font, options.minimum_font)
-    css = "* {margin:0;padding:0;} body {font-family:sans-serif;} p {margin:0;line-height:1.08;}"
+    # insert_htmlbox injects `body {margin:1px}`. A universal selector cannot
+    # override its specificity; reset body explicitly for dense table cells.
+    css = "* {margin:0;padding:0;} body {margin:0;padding:0;font-family:sans-serif;} p {margin:0;line-height:1.08;}"
     archive = None
     if options.font_path:
         font_file = Path(options.font_path).resolve()
         archive = fitz.Archive(str(font_file.parent))
         css += f"@font-face {{font-family:custom;src:url('{font_file.name}');}} body {{font-family:custom;}}"
     if block.vertical:
-        characters = [c for c in block.translation if not c.isspace()]
-        size = font
-        while size >= minimum - 0.001:
-            per_column = max(1, int(height / (size * 1.60)))
-            needed = math.ceil(len(characters) / per_column)
-            available = max(0, int(width / (size * 1.5)))
-            if needed <= available:
-                break
-            size -= 0.25
-        else:
-            return None
-        for column in range(needed):
-            x1 = width - column * size * 1.5
-            box = fitz.Rect(max(0, x1 - size * 1.5), 0, x1, height)
-            text = "<br/>".join(html.escape(c) for c in characters[column * per_column:(column + 1) * per_column])
-            spare, _ = page.insert_htmlbox(box, f'<p style="font-size:{size:.3f}pt;line-height:1.08">{text}</p>', css=css, archive=archive, scale_low=1)
-            if spare < 0:
-                return None
-        return page.number, angle, size / font
+        scale = vertical_paragraph(page, block, css, archive, minimum, font, source, cancel)
+        return None if scale is None else (page.number, angle, scale)
     value = html.escape(block.translation)
     value = value.replace("\n", "<br/>")
     color = f"#{block.color & 0xFFFFFF:06x}"
     weight = "bold" if block.bold else "normal"
     markup = f'<p style="font-size:{font:.3f}pt;color:{color};font-weight:{weight}">{value}</p>'
-    if block.inline:
-        if source is None:
-            return None
-        scale = _inline_page(page, block, markup, css, archive, minimum, font, source)
+    if block.inline or local:
+        scale = flow_paragraph(page, block, css, archive, minimum, font, source, local, cancel)
         return None if scale is None else (page.number, angle, scale)
     spare, scale = page.insert_htmlbox(page.rect, markup, css=css, archive=archive, scale_low=max(0.05, minimum / font))
     if spare < 0:
         return None
     return page.number, angle, scale
+
+
+def _obstacles(block, blocks, graphics):
+    """Reserve pictures and actual neighbouring glyphs, not their empty gaps."""
+    rect = fitz.Rect(block.rect)
+    margin = .15 if block.role == "formula_label" else 1.5
+    result = []
+    for graphic in graphics:
+        g = fitz.Rect(graphic)
+        # Figure labels are intentionally replaced inside their own figure.
+        if (block.role == "figure_label" or block.kind == "raster") and g.contains(rect):
+            continue
+        expanded = g + (-margin, -margin, margin, margin)
+        if expanded.intersects(rect):
+            result.append(expanded)
+    for other in blocks:
+        if other is block or not (fitz.Rect(other.rect) + (-margin, -margin, margin, margin)).intersects(rect):
+            continue
+        for value in other.glyphs or [other.rect]:
+            g = fitz.Rect(value) + (-.15, -.15, .15, .15)
+            if g.intersects(rect):
+                result.append(g)
+    return result
+
+
+def _placement_mask(scratch, block, placement, clip):
+    """Visible ink in a shared page-space clip, including formula clipping."""
+    with fitz.open() as probe:
+        page = probe.new_page(width=clip.width, height=clip.height)
+        target = fitz.Rect(block.rect) - (clip.x0, clip.y0, clip.x0, clip.y0)
+        page.show_pdf_page(target, scratch, placement[0], rotate=placement[1], keep_proportion=False)
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=True)
+        return np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 4)[:, :, 3] > 0
+
+
+def _conflicting_placements(prepared, scratch, cancel):
+    ordered = sorted(prepared, key=lambda item: item[0].rect[1])
+    conflicts = set()
+    for i, (block, placement, _) in enumerate(ordered):
+        checkpoint(cancel)
+        for other, other_placement, _ in ordered[i + 1:]:
+            if other.rect[1] >= block.rect[3]:
+                break
+            clip = fitz.Rect(block.rect) & fitz.Rect(other.rect)
+            if clip.width < .25 or clip.height < .25:
+                continue
+            if np.any(_placement_mask(scratch, block, placement, clip) &
+                      _placement_mask(scratch, other, other_placement, clip)):
+                conflicts.update((block.id, other.id))
+    return conflicts
 
 
 def _raster_patch(page, block: Block, approved: bool):
@@ -158,14 +158,17 @@ def _raster_patch(page, block: Block, approved: bool):
         repaired[mask > 0] = background[::-1].astype(np.uint8)
     # Replace only erased glyph pixels; the transparent surroundings retain
     # vector lines and avoid reintroducing text from neighbouring patches.
-    repaired_alpha = np.dstack((repaired, mask))
-    ok, encoded = cv2.imencode(".png", repaired_alpha)
-    if not ok:
+    # Embed color and opacity separately. Decoding an RGBA PNG premultiplies
+    # transparent pixels; resampling that color plane can produce gray glyph
+    # outlines at higher zoom even though the 300-DPI preview looks clean.
+    ok, encoded = cv2.imencode(".png", repaired)
+    mask_ok, encoded_mask = cv2.imencode(".png", mask)
+    if not ok or not mask_ok:
         return None, "图像修补编码失败。"
     # Use the exact pixel extent as the insertion rectangle to prevent subpixel
     # stretching when PDF clip coordinates were rounded by the rasterizer.
     actual_rect = fitz.Rect(pix.x / zoom, pix.y / zoom, (pix.x + pix.width) / zoom, (pix.y + pix.height) / zoom)
-    return (actual_rect, encoded.tobytes()), ""
+    return (actual_rect, encoded.tobytes(), encoded_mask.tobytes()), ""
 
 
 def _restore_links(page, links):
@@ -214,6 +217,12 @@ def export_pdf(project: Project, output: str | Path, options: Options, cancel=No
                   "page": None if page is None else page + 1, "region": region, "temporary": temporary})
 
     step("prepare", "检查原文与已保存译文")
+    options.validate()
+    selected = parse_pages(options.page_range, len(project.pages))
+    if any(i not in project.selected_pages and not project.pages[i].analyzed for i in selected):
+        raise ValueError('所选页码包含尚未分析的页面，请先分析版面后再导出。')
+    project.selected_pages = selected
+    project.options['page_range'] = options.page_range
     output = Path(output).resolve()
     if output == Path(project.source).resolve():
         raise ValueError("输出路径不能覆盖原 PDF。")
@@ -225,16 +234,43 @@ def export_pdf(project: Project, output: str | Path, options: Options, cancel=No
     with fitz.open(project.source) as document, fitz.open() as scratch:
         if document.needs_pass:
             raise ValueError("请先解锁加密的原 PDF。")
+        from .layout_upgrade import refresh_layout
+        refresh_layout(project, document, cancel, log)
+        for block in project.blocks:
+            if block.page in project.selected_pages:
+                block.clear_export_notes()
         # PDF graft maps snapshot the source object table. Build all text pages
         # before the first import so later additions cannot invalidate that map.
         text_prepared = {}
+        text_errors = {}
+        geometry = {}
+        from .structure import figure_rects
+        for index in project.selected_pages:
+            checkpoint(cancel)
+            original = document[index]
+            rotation = original.rotation
+            original.set_rotation(0)
+            try:
+                graphics = figure_rects(original)
+                # Even small photographs / icons are obstacles. A full-page
+                # scan is the page background, not an obstacle to its OCR text.
+                graphics.extend(fitz.Rect(i["bbox"]) for i in original.get_image_info()
+                                if .0001 < fitz.Rect(i["bbox"]).get_area() / original.rect.get_area() < .70)
+                geometry[index] = ([b for b in project.blocks if b.page == index], graphics)
+            finally:
+                original.set_rotation(rotation)
         candidates = [b for b in project.blocks if b.page in project.selected_pages and not b.protected
-                      and b.translation.strip() and b.translation != b.text and b.status != "preserved"]
+                      and b.translation.strip() and b.translation != b.text and not b.layout_stale
+                      and b.status not in ("preserved", "layout_pending") and block_enabled(b, options)]
         log(f"开始预排版 {len(candidates)} 个译文区域。")
         for number, block in enumerate(candidates):
             checkpoint(cancel)
             step("typeset", "预排版译文", number, len(candidates), block.page, block.id)
-            text_prepared[block.id] = _text_page(scratch, block, options, document)
+            blocks, graphics = geometry[block.page]
+            before_notes = set(block.notes)
+            text_prepared[block.id] = _text_page(scratch, block, options, document,
+                                                _obstacles(block, blocks, graphics), cancel)
+            text_errors[block.id] = bool(set(block.notes) - before_notes)
         step("typeset", "预排版译文", len(candidates), len(candidates))
         for page_number, index in enumerate(project.selected_pages):
             checkpoint(cancel)
@@ -250,14 +286,21 @@ def export_pdf(project: Project, output: str | Path, options: Options, cancel=No
             existing_redactions = any(a.type[0] == fitz.PDF_ANNOT_REDACT for a in page.annots() or [])
             blocks = [b for b in project.blocks if b.page == index]
             prepared = []
-            protected_rects = [fitz.Rect(b.rect) for b in blocks if b.protected]
+            protected_rects = [fitz.Rect(r) for b in blocks if b.protected for r in b.glyphs or [b.rect]]
+            protected_index = RectIndex(protected_rects)
             page_bounds = page.rect
             for number, block in enumerate(blocks):
                 checkpoint(cancel)
+                if not block_enabled(block, options):
+                    continue
                 step("check_regions", "检查区域与图像背景", number, len(blocks), index, block.id)
                 if block.notes and not block.approved:
                     unresolved.append(block.id)
                 if block.protected or block.status == "preserved" or block.translation == block.text:
+                    continue
+                if block.layout_stale or block.status == "layout_pending":
+                    block.note("公式或段落结构已更新；旧译文保留供核对，请重新翻译或人工确认后导出。")
+                    unresolved.append(block.id)
                     continue
                 if not block.translation.strip():
                     block.note("缺少译文，输出中保留原文。")
@@ -273,18 +316,27 @@ def export_pdf(project: Project, output: str | Path, options: Options, cancel=No
                     unresolved.append(block.id)
                     continue
                 # Exact glyph-center erasers avoid deleting neighbouring math.
-                if block.kind == "native" and any(any(p.intersects(fitz.Rect(e)) for p in protected_rects) for e in block.erasers):
+                if block.kind == "native" and any(protected_index.intersects(e) for e in block.erasers):
                     block.note("文字与受保护公式重叠，保留原文，需人工调整区域。")
                     unresolved.append(block.id)
                     continue
                 fit = text_prepared.get(block.id)
                 if fit is None:
                     block.status = "overflow"
-                    block.note(f"译文在原区域内无法以最低 {min(options.minimum_font, block.fontsize):g} pt 完整放下；保留原文。")
+                    if not text_errors.get(block.id):
+                        block.note(f"译文在原区域内无法以最低 {min(options.minimum_font, block.fontsize):g} pt 完整放下；保留原文。")
                     unresolved.append(block.id)
                     continue
                 patch = None
                 if block.kind == "raster":
+                    # A broad OCR paragraph patch must never inpaint a photo
+                    # that lies in a wraparound gap. Without individual OCR
+                    # line masks, leave this ambiguous source region intact.
+                    if any(fitz.Rect(g).intersects(rect) and not fitz.Rect(g).contains(rect)
+                           for g in geometry[index][1]):
+                        block.note("扫描文字区域跨越图片边界，保留原图，请按文字行调整区域。")
+                        unresolved.append(block.id)
+                        continue
                     step("repair_image", "修补图内文字", page=index, region=block.id)
                     patch, reason = _raster_patch(page, block, block.approved)
                     if patch is None:
@@ -292,9 +344,32 @@ def export_pdf(project: Project, output: str | Path, options: Options, cancel=No
                         unresolved.append(block.id)
                         continue
                 prepared.append((block, fit, patch))
+            step("check_collisions", "检查译文、公式与图片的间距", page=index)
+            conflicts = _conflicting_placements(prepared, scratch, cancel)
+            for block, _, _ in prepared:
+                if block.id in conflicts:
+                    block.note("相邻译文排版重叠，保留原文，请调整区域。")
+                    block.status = "overflow"
+                    unresolved.append(block.id)
+            prepared = [item for item in prepared if item[0].id not in conflicts]
+            # Validate deletion on a copy before changing the real source page.
+            # Fonts with nonstandard ascent / descent can survive center-point
+            # redactions. Never overlay a translation onto surviving source ink.
+            from .redaction import characters, erasers_for, deletion_failures
+            chars = characters(page)
+            plans = [(b, *erasers_for(b, chars)) for b, _, _ in prepared if b.erasers or b.kind == 'native']
+            if plans:
+                step('verify_erase', '校验原文字形删除', page=index)
+                failures = deletion_failures(document, index, plans, _add_redaction_quads, cancel)
+                for b, _, _ in prepared:
+                    if b.id in failures:
+                        b.note('原文字形删除校验未通过，保留原文，请核对该区域。')
+                        b.status = 'overflow'
+                        unresolved.append(b.id)
+                prepared = [item for item in prepared if item[0].id not in failures]
+                plans = [item for item in plans if item[0].id not in failures]
             # Prepare all image patches from the untouched source page first.
-            erasers = [eraser for block, _, _ in prepared if block.erasers or block.kind == "native"
-                       for eraser in block.erasers or [block.rect]]
+            erasers = [eraser for _, boxes, _ in plans for eraser in boxes]
             log(f"第 {index + 1} 页：准备 {len(erasers)} 个字形删除区域，批量处理。")
             step("prepare_erasers", "准备原文字形删除", 0, len(erasers), index)
             _add_redaction_quads(page, erasers, cancel,
@@ -319,7 +394,7 @@ def export_pdf(project: Project, output: str | Path, options: Options, cancel=No
                 checkpoint(cancel)
                 step("write_text", "写回译文与公式", number, len(prepared), index, block.id)
                 if patch:
-                    page.insert_image(patch[0], stream=patch[1], overlay=True)
+                    page.insert_image(patch[0], stream=patch[1], mask=patch[2], overlay=True)
                 scratch_index, angle, scale = fit
                 page.show_pdf_page(fitz.Rect(block.rect), scratch, scratch_index, rotate=angle, keep_proportion=False, overlay=True)
                 if block.status == "overflow":

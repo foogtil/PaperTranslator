@@ -142,7 +142,39 @@ def run_checks(directory: str | Path, include_ocr=True, include_gui=True) -> dic
     translate_project(partial, options, partial_client, lambda: None, lambda t: None)
     partial_client.close()
     result["checks"]["partial_translation_retry"] = calls == [["b0", "b1", "b2"], ["b1"]] and all(b.status == "translated" for b in partial.blocks)
+    from .prompt_context import TranslationContext
+    context = TranslationContext(partial).fields(partial.blocks, None)
+    result["checks"]["compact_context_avoids_source_duplicates"] = not context["document_context"] and not context["page_context"]
+    from .usage import usage_delta
+    measured = usage_delta({"prompt_tokens": 100, "completion_tokens": 80,
+                            "prompt_cache_hit_tokens": 60, "completion_tokens_details": {"reasoning_tokens": 30}})
+    result["checks"]["usage_subsets_not_double_counted"] = measured["input_tokens"] + measured["output_tokens"] == 180 and measured["reasoning_tokens"] == 30 and measured["cached_input_tokens"] == 60
+    barrier = threading.Barrier(2)
+    parallel_calls = []
+    def parallel_response(request):
+        body = json.loads(request.content)
+        segment = json.loads(body["messages"][-1]["content"])["segments"][0]
+        parallel_calls.append(segment["id"])
+        barrier.wait(timeout=5)
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps({"segments": [
+            {"id": segment["id"], "translation": "译文 " + segment["id"]}]})}, "finish_reason": "stop"}]})
+    parallel_project = Project("offline", "", {}, blocks=[Block(f"b{i}", i, [10,10,100,30], "Scientific prose") for i in range(2)])
+    parallel_client = ChatClient(Provider(api_key="offline-selftest-key"), transport=httpx.MockTransport(parallel_response))
+    try:
+        translate_project(parallel_project, Options(vision_review=False, translation_workers=2), parallel_client, lambda: None, lambda _: None)
+        result["checks"]["parallel_http_preserves_ids"] = (sorted(parallel_calls) == ["b0", "b1"]
+            and all(b.translation == "译文 " + b.id for b in parallel_project.blocks))
+    finally:
+        parallel_client.close()
     result["unresolved_regions"] = report["needs_review"]
+    from .layout_checks import run_checks as run_layout_checks
+    result["checks"].update(run_layout_checks(root / "layout-safety"))
+    from .review_checks import run_checks as run_review_checks
+    result["checks"].update(run_review_checks(root / "review-fixes"))
+    from .disease_checks import run_checks as run_disease_checks
+    result["checks"].update(run_disease_checks(root / "font-table-fixes"))
+    from .workflow_checks import run_checks as run_workflow_checks
+    result['checks'].update(run_workflow_checks(root / 'workflow-fixes'))
     if include_ocr:
         with fitz.open() as chart:
             p = chart.new_page(width=340, height=190)

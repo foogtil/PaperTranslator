@@ -75,7 +75,7 @@ class ExportOptionsTests(unittest.TestCase):
         self.assertTrue(cache.is_relative_to(self.root / "internal"))
         self.assertEqual(legacy.read_bytes(), original)
         self.assertEqual(Project.load(cache).blocks[0].translation, "科研结果")
-        self.assertNotEqual(cache, cached_project_path(str(self.source), str(self.root / "different-output")))
+        self.assertEqual(cache, cached_project_path(str(self.source), str(self.root / "different-output")))
 
     def test_queued_export_can_produce_only_pdf_and_keep_resume_cache_internal(self):
         output = self.root / "pdf-only"
