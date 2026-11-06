@@ -10,25 +10,18 @@ PaperTranslator is a Windows desktop application for **position-preserving PDF t
 
 The default direction is English → Simplified Chinese. DeepSeek and Xiaomi MiMo presets are included, and any Chat Completions-compatible endpoint can be configured.
 
-Version **1.0.0** adds configurable parallel translation, reduced repeated context, and API usage statistics. The interface language defaults to Simplified Chinese and can be changed below the header subtitle. The open-source notice opens [this GitHub repository](https://github.com/foogtil/PaperTranslator).
-
-The **2026-10-30 revision of 1.1.0** also repairs fragmented inline formulas, preserves fractional formula geometry and baselines, and flows paragraphs around photographs. Unsafe placements retain the original content for review. See [layout fixes and saved-job migration](docs/LAYOUT_FIXES.md).
-
-The same-day [review fixes](docs/REVIEW_FIXES.md) preserve manual edits and cached progress when changing page ranges, render complete formulas in vertical columns, protect common algebra in ordinary fonts, and remove resolved layout warnings.
-
-The **2026-10-31 revision** fixes source-text remnants from unusual font metrics, verifies deletion before overlaying translations, and separates aligned table cells from prose. Short title continuations and DOI recognition are also repaired. See [font and table fixes](docs/FONT_TABLE_FIXES.md).
+Version **1.0.0** includes configurable parallel translation, reduced repeated context, API usage statistics, formula fragment merging, fractional formula geometry and baseline preservation, and text flowing around photographs. It also repairs source-text remnants from unusual font metrics, verifies text deletion before overlaying translations, separates aligned table cells from prose, and fixes short title continuations and DOI recognition. The interface language defaults to Simplified Chinese and can be changed below the header subtitle. The open-source notice opens [this GitHub repository](https://github.com/foogtil/PaperTranslator). Unsafe placements retain the original content for review; see the linked notes below.
 
 > The source code lives in this repository. Prebuilt Windows builds are published on the [Releases](https://github.com/foogtil/PaperTranslator/releases) page and are uploaded separately from the source tree. You can also build from source with the instructions below.
 
 ## Download
 
-Prebuilt Windows builds are published on the [Releases](https://github.com/foogtil/PaperTranslator/releases) page. Each release should include:
+Prebuilt Windows builds are published on the [Releases](https://github.com/foogtil/PaperTranslator/releases) page.
 
-- the portable ZIP (with licenses and third-party sources),
-- the standalone `.exe`,
-- the source ZIP,
-- the verified `vendor-sources` archives required as AGPL corresponding source,
-- SHA-256 checksums.
+This release provides:
+
+- the Windows installer: `PaperTranslator-1.0.0-Setup.exe`;
+- the portable ZIP: `PaperTranslator-1.0.0-Windows-x64.zip`, which contains the application, licenses, third-party sources and the source ZIP.
 
 ## Screenshots
 
@@ -179,20 +172,20 @@ PyMuPDF / MuPDF (Artifex), RapidOCR and PaddleOCR, ONNX Runtime, OpenCV, NumPy, 
 
 DeepSeek and Xiaomi MiMo are external services. They do not sponsor or endorse this project.
 
-## Token optimization in 1.1.0 (2026-10-28)
+## Token optimization
 
-A new **Reduce repeated context** option keeps requested paragraphs and complete figure labels while limiting repeated supporting context. The queue now displays API-reported token usage, cache and reasoning details, retries, and missing usage. Existing translations survive layout overflow and are reused on resume. See [usage details and limits](docs/TOKEN_USAGE.md). No paid API quality comparison was performed; reduced input characters are not a promised billing reduction.
+A new **Reduce repeated context** option keeps requested paragraphs and complete figure labels while limiting repeated supporting context. The queue displays API-reported token usage, cache and reasoning details, retries, and missing usage. Existing translations survive layout overflow and are reused on resume. See [usage details and limits](docs/TOKEN_USAGE.md). No paid API quality comparison was performed; reduced input characters are not a promised billing reduction.
 
 Translation concurrency defaults to 2 (selectable 1–4). Independent HTTP batches run concurrently with unchanged per-request models, prompts and source units. PDF image rendering remains on the owning worker thread. Use 1 if your provider rate-limits concurrent requests.
-# 1.1.0 workflow revision (2026-11-02)
 
-Fixes resuming an opened project or changing the output folder, concurrent application saves, the figure-text switch, page selection at export, reanalysis of changed source PDFs, and response timeouts. Completed translations and manual edits are retained. Changed PDFs preserve the previous project before reanalysis. API reads honor the configured timeout (180 seconds by default) and remain cancellable; interrupted responses are not automatically resubmitted. See [workflow revision](docs/WORKFLOW_FIXES.md).
+## Workflow reliability
 
+The 1.0.0 workflow handles resuming an opened project or changing the output folder, concurrent application saves, the figure-text switch, page selection at export, reanalysis of changed source PDFs, and response timeouts. Completed translations and manual edits are retained. Changed PDFs preserve the previous project before reanalysis. API reads honor the configured timeout (180 seconds by default) and remain cancellable; interrupted responses are not automatically resubmitted. See [workflow fixes](docs/WORKFLOW_FIXES.md).
 
-## Consolidated 1.0.0 release and installer (2026-11-02)
+## Packaging and installer
 
-The current application, including all previous 1.1.0 fixes, is now numbered 1.0.0. Distributions: `PaperTranslator-1.0.0-Standalone.exe` for direct use and `PaperTranslator-1.0.0-Setup.exe` for installation. Both use the new open-book, mountain-landscape icon for 文献译境. Earlier revision headings are historical records.
+The 1.0.0 build provides a portable directory, a standalone executable and a Windows installer. The installer and the standalone executable use the open-book, mountain-landscape icon for 文献译境.
 
-The installer defaults to `%LOCALAPPDATA%\Programs\PaperTranslator`, supports a custom location, Start menu shortcuts, an optional desktop shortcut and uninstall. Python is bundled. Uninstall preserves settings, API keys and translation jobs. Both distributions use the same per-user application data directory.
+The installer defaults to `%LOCALAPPDATA%\Programs\PaperTranslator`, supports a custom location, Start menu shortcuts, an optional desktop shortcut and uninstall. Python is bundled. Uninstall preserves settings, API keys and translation jobs. The portable and installed versions use the same per-user application data directory.
 
 Build with `python scripts/build.py`, then `python scripts/build_installer.py --compiler "path/to/ISCC.exe"` using [Inno Setup 7](https://jrsoftware.org/isdl.php).
